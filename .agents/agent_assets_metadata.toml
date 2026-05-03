@@ -1,0 +1,8 @@
+uploads = []
+outputs = []
+
+[[generated]]
+id = "hSMH1YhW-3VQl0Rs8px-4"
+uri = "file://artifacts/mobile/assets/images/icon.png"
+type = "image"
+title = "jaggery market app icon"
