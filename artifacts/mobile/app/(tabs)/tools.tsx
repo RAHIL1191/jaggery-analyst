@@ -8,16 +8,7 @@ import { useColors } from "@/hooks/useColors";
 import { useMarket } from "@/hooks/useMarket";
 import { useAIConfig } from "@/hooks/useAIConfig";
 
-type Tool = {
-  id: string;
-  title: string;
-  description: string;
-  icon: string;
-  accent: string;
-  route: string;
-  badge?: string;
-};
-
+type Tool = { id: string; title: string; description: string; icon: string; accent: string; route: string; badge?: string };
 const TOOLS: Tool[] = [
   { id: "calculator", title: "Profit Calculator", description: "Simulate trade P&L before committing", icon: "percent", accent: "#16A34A", route: "/(tabs)/calculator", badge: "HIGH IMPACT" },
   { id: "journal", title: "Trade Journal", description: "Track buys, sells & portfolio P&L", icon: "book-open", accent: "#B45309", route: "/(tabs)/journal" },
@@ -29,152 +20,23 @@ const TOOLS: Tool[] = [
   { id: "policy", title: "Policy & MSP Tracker", description: "MSP history, GST rules & govt schemes", icon: "file-text", accent: "#DC2626", route: "/(tabs)/policy" },
   { id: "advisor", title: "AI Market Advisor", description: "Ask questions, get expert market advice", icon: "cpu", accent: "#6D28D9", route: "/(tabs)/chat", badge: "AI" },
   { id: "alerts", title: "Price Alerts", description: "Set price thresholds & notifications", icon: "bell", accent: "#EF4444", route: "/(tabs)/alerts" },
-  { id: "settings", title: "AI & Data Settings", description: "Configure AI provider, API key, live price", icon: "settings", accent: "#0284C7", route: "/(tabs)/settings", badge: "CONFIG" },
+  { id: "settings", title: "AI & Data Settings", description: "Configure AI provider, live source, products", icon: "settings", accent: "#0284C7", route: "/(tabs)/settings", badge: "CONFIG" },
 ];
 
 export default function ToolsScreen() {
-  const colors = useColors();
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
-  const { snapshot } = useMarket();
-  const { config } = useAIConfig();
-  const topPad = Platform.OS === "web" ? 67 : insets.top;
-
+  const colors = useColors(); const insets = useSafeAreaInsets(); const router = useRouter(); const { snapshot, sourceLabel } = useMarket(); const { config } = useAIConfig(); const topPad = Platform.OS === "web" ? 67 : insets.top;
   const aiActive = config.enabled && (config.provider === "ollama" || config.provider === "custom" ? !!config.baseUrl : !!config.apiKey);
-
-  const handleTool = (route: string) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    router.push(route as Parameters<typeof router.push>[0]);
-  };
-
-  return (
-    <ScrollView
-      style={[styles.scroll, { backgroundColor: colors.background }]}
-      contentContainerStyle={[styles.content, { paddingTop: topPad + 16, paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 110 }]}
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={[styles.title, { color: colors.foreground }]}>Tools</Text>
-      <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>
-        Advanced analytics to maximise your trading profit
-      </Text>
-
-      {/* AI Status Bar */}
-      {!aiActive && (
-        <TouchableOpacity
-          onPress={() => handleTool("/(tabs)/settings")}
-          style={[styles.aiPromptBar, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "25" }]}
-        >
-          <Feather name="zap" size={14} color={colors.primary} />
-          <Text style={[styles.aiPromptText, { color: colors.primary }]}>
-            Connect AI (OpenAI, Anthropic, or local Ollama) for real AI market advice → Tap Settings
-          </Text>
-          <Feather name="arrow-right" size={14} color={colors.primary} />
-        </TouchableOpacity>
-      )}
-
-      {aiActive && (
-        <View style={[styles.aiActiveBar, { backgroundColor: "#10A37F10", borderColor: "#10A37F30" }]}>
-          <Feather name="check-circle" size={14} color="#10A37F" />
-          <Text style={[styles.aiActiveText, { color: "#10A37F" }]}>
-            AI Active · {config.provider === "openai" ? "OpenAI" : config.provider === "anthropic" ? "Anthropic" : config.provider === "ollama" ? "Ollama" : "Custom"} · {config.model || "default model"}
-            {config.useManualPrice && config.manualPrice ? ` · Manual price ₹${config.manualPrice}/qtl` : ""}
-          </Text>
-        </View>
-      )}
-
-      {/* Market Snapshot */}
-      {snapshot && (
-        <View style={[styles.snapshotBar, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <View style={styles.snapItem}>
-            <Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Market Price</Text>
-            <Text style={[styles.snapValue, { color: colors.foreground }]}>₹{snapshot.currentPrice.toLocaleString("en-IN")}/qtl</Text>
-          </View>
-          <View style={[styles.snapDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.snapItem}>
-            <Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Signal</Text>
-            <Text style={[styles.snapValue, { color: snapshot.recommendation === "BUY" ? colors.buy : snapshot.recommendation === "SELL" ? colors.sell : colors.hold }]}>
-              {snapshot.recommendation} {snapshot.confidence}%
-            </Text>
-          </View>
-          <View style={[styles.snapDivider, { backgroundColor: colors.border }]} />
-          <View style={styles.snapItem}>
-            <Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Harvest</Text>
-            <Text style={[styles.snapValue, { color: snapshot.harvestScore > 0 ? colors.buy : colors.sell }]}>
-              {snapshot.harvestScore > 0 ? "Bullish" : "Bearish"}
-            </Text>
-          </View>
-        </View>
-      )}
-
-      {/* Tools Grid */}
-      <View style={styles.grid}>
-        {TOOLS.map((tool) => (
-          <TouchableOpacity
-            key={tool.id}
-            onPress={() => handleTool(tool.route)}
-            activeOpacity={0.85}
-            style={[styles.toolCard, { backgroundColor: colors.card, borderColor: tool.id === "settings" && !aiActive ? colors.primary + "40" : colors.border }]}
-          >
-            <View style={[styles.iconWrap, { backgroundColor: tool.accent + "18" }]}>
-              <Feather name={tool.icon as "percent"} size={22} color={tool.accent} />
-            </View>
-            {tool.badge && (
-              <View style={[styles.badge, { backgroundColor: tool.accent + "20" }]}>
-                <Text style={[styles.badgeText, { color: tool.accent }]}>
-                  {tool.id === "advisor" && aiActive ? "AI LIVE" : tool.badge}
-                </Text>
-              </View>
-            )}
-            <Text style={[styles.toolTitle, { color: colors.foreground }]}>{tool.title}</Text>
-            <Text style={[styles.toolDesc, { color: colors.mutedForeground }]} numberOfLines={2}>
-              {tool.description}
-            </Text>
-            <View style={styles.arrowRow}>
-              <View style={[styles.arrowChip, { backgroundColor: tool.accent + "12" }]}>
-                <Feather name="arrow-right" size={13} color={tool.accent} />
-              </View>
-            </View>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <View style={[styles.proTip, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "25" }]}>
-        <Feather name="zap" size={14} color={colors.primary} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.proTipTitle, { color: colors.foreground }]}>Pro Tip</Text>
-          <Text style={[styles.proTipText, { color: colors.mutedForeground }]}>
-            For best results: Set your mandi's actual price in Settings, connect an AI advisor, use the Profit Calculator before every trade, and log all trades in the Journal to track real P&L.
-          </Text>
-        </View>
-      </View>
-    </ScrollView>
-  );
+  const handleTool = (route: string) => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); router.push(route as Parameters<typeof router.push>[0]); };
+  return (<ScrollView style={[styles.scroll, { backgroundColor: colors.background }]} contentContainerStyle={[styles.content, { paddingTop: topPad + 16, paddingBottom: Platform.OS === "web" ? 34 : insets.bottom + 110 }]} showsVerticalScrollIndicator={false}>
+      <Text style={[styles.title, { color: colors.foreground }]}>Tools</Text><Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Advanced analytics to maximise your trading profit</Text>
+      <TouchableOpacity onPress={() => handleTool("/(tabs)/settings")} style={[styles.sourceBar, { backgroundColor: colors.card, borderColor: colors.border }]}><Feather name="database" size={14} color={colors.primary} /><Text style={[styles.sourceBarText, { color: colors.foreground }]}>{sourceLabel}</Text><Text style={[styles.sourceBarSub, { color: colors.mutedForeground }]}>{config.dataSourceMode === "remote" ? "Live URL / dataset" : config.dataSourceMode === "manual" ? "Manual daily price" : "Seasonal model"}</Text></TouchableOpacity>
+      {!aiActive && (<TouchableOpacity onPress={() => handleTool("/(tabs)/settings")} style={[styles.aiPromptBar, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "25" }]}><Feather name="zap" size={14} color={colors.primary} /><Text style={[styles.aiPromptText, { color: colors.primary }]}>Connect AI for real market advice → Tap Settings</Text><Feather name="arrow-right" size={14} color={colors.primary} /></TouchableOpacity>)}
+      {aiActive && (<View style={[styles.aiActiveBar, { backgroundColor: "#10A37F10", borderColor: "#10A37F30" }]}><Feather name="check-circle" size={14} color="#10A37F" /><Text style={[styles.aiActiveText, { color: "#10A37F" }]}>AI Active · {config.provider === "openai" ? "OpenAI" : config.provider === "anthropic" ? "Anthropic" : config.provider === "ollama" ? "Ollama" : "Custom"} · {config.model || "default model"}{config.useManualPrice && config.manualPrice ? ` · Manual price ₹${config.manualPrice}/qtl` : ""}</Text></View>)}
+      {snapshot && (<View style={[styles.snapshotBar, { backgroundColor: colors.card, borderColor: colors.border }]}><View style={styles.snapItem}><Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Market Price</Text><Text style={[styles.snapValue, { color: colors.foreground }]}>₹{snapshot.currentPrice.toLocaleString("en-IN")}/qtl</Text></View><View style={[styles.snapDivider, { backgroundColor: colors.border }]} /><View style={styles.snapItem}><Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Signal</Text><Text style={[styles.snapValue, { color: snapshot.recommendation === "BUY" ? colors.buy : snapshot.recommendation === "SELL" ? colors.sell : colors.hold }]}>{snapshot.recommendation} {snapshot.confidence}%</Text></View><View style={[styles.snapDivider, { backgroundColor: colors.border }]} /><View style={styles.snapItem}><Text style={[styles.snapLabel, { color: colors.mutedForeground }]}>Harvest</Text><Text style={[styles.snapValue, { color: snapshot.harvestScore > 0 ? colors.buy : colors.sell }]}>{snapshot.harvestScore > 0 ? "Bullish" : "Bearish"}</Text></View></View>)}
+      <View style={styles.grid}>{TOOLS.map((tool) => (<TouchableOpacity key={tool.id} onPress={() => handleTool(tool.route)} activeOpacity={0.85} style={[styles.toolCard, { backgroundColor: colors.card, borderColor: tool.id === "settings" && !aiActive ? colors.primary + "40" : colors.border }]}><View style={[styles.iconWrap, { backgroundColor: tool.accent + "18" }]}><Feather name={tool.icon as never} size={22} color={tool.accent} /></View>{tool.badge && (<View style={[styles.badge, { backgroundColor: tool.accent + "20" }]}><Text style={[styles.badgeText, { color: tool.accent }]}>{tool.id === "advisor" && aiActive ? "AI LIVE" : tool.badge}</Text></View>)}<Text style={[styles.toolTitle, { color: colors.foreground }]}>{tool.title}</Text><Text style={[styles.toolDesc, { color: colors.mutedForeground }]} numberOfLines={2}>{tool.description}</Text><View style={styles.arrowRow}><View style={[styles.arrowChip, { backgroundColor: tool.accent + "12" }]}><Feather name="arrow-right" size={13} color={tool.accent} /></View></View></TouchableOpacity>))}</View>
+    </ScrollView>);
 }
 
 const styles = StyleSheet.create({
-  scroll: { flex: 1 },
-  content: { paddingHorizontal: 16, gap: 14 },
-  title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.5 },
-  subtitle: { fontFamily: "Inter_400Regular", fontSize: 13, marginTop: -10 },
-  aiPromptBar: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 },
-  aiPromptText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 },
-  aiActiveBar: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 },
-  aiActiveText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 },
-  snapshotBar: { flexDirection: "row", borderRadius: 12, borderWidth: 1, padding: 14, alignItems: "center" },
-  snapItem: { flex: 1, alignItems: "center", gap: 3 },
-  snapLabel: { fontFamily: "Inter_400Regular", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 },
-  snapValue: { fontFamily: "Inter_700Bold", fontSize: 13 },
-  snapDivider: { width: 1, height: 28, marginHorizontal: 4 },
-  grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  toolCard: { width: "47.5%", borderRadius: 16, borderWidth: 1, padding: 14, gap: 8, position: "relative" },
-  iconWrap: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" },
-  badge: { position: "absolute", top: 12, right: 12, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 },
-  badgeText: { fontFamily: "Inter_700Bold", fontSize: 8, letterSpacing: 0.8 },
-  toolTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14, lineHeight: 18 },
-  toolDesc: { fontFamily: "Inter_400Regular", fontSize: 11, lineHeight: 16 },
-  arrowRow: { flexDirection: "row", justifyContent: "flex-end" },
-  arrowChip: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
-  proTip: { flexDirection: "row", gap: 10, padding: 14, borderRadius: 12, borderWidth: 1, alignItems: "flex-start" },
-  proTipTitle: { fontFamily: "Inter_600SemiBold", fontSize: 13, marginBottom: 3 },
-  proTipText: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
+  scroll: { flex: 1 }, content: { paddingHorizontal: 16, gap: 14 }, title: { fontFamily: "Inter_700Bold", fontSize: 26, letterSpacing: -0.5 }, subtitle: { fontFamily: "Inter_400Regular", fontSize: 13, marginTop: -10 }, sourceBar: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 }, sourceBarText: { fontFamily: "Inter_600SemiBold", fontSize: 12, flex: 1 }, sourceBarSub: { fontFamily: "Inter_400Regular", fontSize: 11 }, aiPromptBar: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 }, aiPromptText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 }, aiActiveBar: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 }, aiActiveText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 }, snapshotBar: { flexDirection: "row", borderRadius: 12, borderWidth: 1, padding: 14, alignItems: "center" }, snapItem: { flex: 1, alignItems: "center", gap: 3 }, snapLabel: { fontFamily: "Inter_400Regular", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }, snapValue: { fontFamily: "Inter_700Bold", fontSize: 13 }, snapDivider: { width: 1, height: 28, marginHorizontal: 4 }, grid: { flexDirection: "row", flexWrap: "wrap", gap: 12 }, toolCard: { width: "47.5%", borderRadius: 16, borderWidth: 1, padding: 14, gap: 8, position: "relative" }, iconWrap: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center" }, badge: { position: "absolute", top: 12, right: 12, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 20 }, badgeText: { fontFamily: "Inter_700Bold", fontSize: 8, letterSpacing: 0.8 }, toolTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14, lineHeight: 18 }, toolDesc: { fontFamily: "Inter_400Regular", fontSize: 11, lineHeight: 16 }, arrowRow: { flexDirection: "row", justifyContent: "flex-end" }, arrowChip: { width: 26, height: 26, borderRadius: 13, alignItems: "center", justifyContent: "center" },
 });

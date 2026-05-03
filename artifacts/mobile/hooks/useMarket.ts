@@ -1,10 +1,11 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { generateMarketSnapshot, MarketSnapshot } from "@/constants/marketData";
 import { DEFAULT_AI_CONFIG, type AIConfig } from "@/hooks/useAIConfig";
 
 const ALERTS_KEY = "jaggery_alerts_v1";
-const AI_CONFIG_KEY = "@jaggery_ai_config_v3";
+const AI_CONFIG_KEY = "@jaggery_ai_config_v4";
+const PRICE_HISTORY_KEY = "@jaggery_price_history_v1";
 
 export type PriceAlert = {
   id: string;
@@ -13,6 +14,14 @@ export type PriceAlert = {
   label: string;
   triggered: boolean;
   createdAt: string;
+};
+
+export type PriceHistoryEntry = {
+  date: string;
+  source: string;
+  price: number;
+  mode: string;
+  productPrices?: Array<{ key: string; label: string; price: string }>;
 };
 
 function applyManualPrice(snapshot: MarketSnapshot, manualPrice: number): MarketSnapshot {
@@ -59,9 +68,7 @@ async function loadRemoteSnapshot(apiUrl: string, apiKey?: string): Promise<Mark
   if (!apiUrl) return null;
   try {
     const res = await fetch(apiUrl, {
-      headers: {
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-      },
+      headers: { ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -100,6 +107,18 @@ async function loadDatasetSnapshot(url: string, format: "csv" | "json"): Promise
   }
 }
 
+function appendHistory(entry: PriceHistoryEntry) {
+  AsyncStorage.getItem(PRICE_HISTORY_KEY).then((raw) => {
+    const existing = raw ? (JSON.parse(raw) as PriceHistoryEntry[]) : [];
+    const next = [entry, ...existing].slice(0, 365);
+    AsyncStorage.setItem(PRICE_HISTORY_KEY, JSON.stringify(next));
+  });
+}
+
+export function getPriceHistory() {
+  return AsyncStorage.getItem(PRICE_HISTORY_KEY).then((raw) => raw ? (JSON.parse(raw) as PriceHistoryEntry[]) : []);
+}
+
 export function useMarket() {
   const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
@@ -118,11 +137,13 @@ export function useMarket() {
       .then(async ([base, config]) => {
         let next = base;
         let label = "Deterministic seasonal model";
+        let source = "seasonal";
         if (config?.dataSourceMode === "manual" && config.manualPrice) {
           const manual = parseFloat(config.manualPrice);
           if (Number.isFinite(manual)) {
             next = applyManualPrice(base, manual);
             label = "Manual price from Settings";
+            source = "manual";
             setManualPriceActive(true);
           }
         } else if (config?.dataSourceMode === "remote") {
@@ -130,12 +151,14 @@ export function useMarket() {
           if (remote) {
             next = remote;
             label = "Remote live market URL";
+            source = config.marketApiUrl || "remote";
             setManualPriceActive(true);
           } else {
             const dataset = await loadDatasetSnapshot(config.marketDatasetUrl, config.marketDatasetFormat);
             if (dataset) {
               next = dataset;
               label = `Dataset import (${config.marketDatasetFormat.toUpperCase()})`;
+              source = config.marketDatasetUrl || "dataset";
               setManualPriceActive(true);
             } else {
               setManualPriceActive(false);
@@ -148,6 +171,13 @@ export function useMarket() {
         setSnapshot(next);
         setSourceLabel(label);
         setLastRefresh(new Date());
+        appendHistory({
+          date: new Date().toISOString(),
+          source,
+          price: next.currentPrice,
+          mode: config?.dataSourceMode ?? "deterministic",
+          productPrices: config?.productPrices,
+        });
       })
       .catch((e) => {
         console.error("Market snapshot error:", e);
@@ -166,7 +196,6 @@ export function useMarket() {
 
 export function useAlerts() {
   const [alerts, setAlerts] = useState<PriceAlert[]>([]);
-
   useEffect(() => {
     AsyncStorage.getItem(ALERTS_KEY).then((raw) => {
       if (raw) setAlerts(JSON.parse(raw));
@@ -178,30 +207,21 @@ export function useAlerts() {
     AsyncStorage.setItem(ALERTS_KEY, JSON.stringify(next));
   }, []);
 
-  const addAlert = useCallback(
-    (type: "above" | "below", price: number) => {
-      const alert: PriceAlert = {
-        id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
-        type,
-        price,
-        label:
-          type === "above"
-            ? `Alert when price goes above ₹${price}`
-            : `Alert when price falls below ₹${price}`,
-        triggered: false,
-        createdAt: new Date().toISOString(),
-      };
-      save([...alerts, alert]);
-    },
-    [alerts, save]
-  );
+  const addAlert = useCallback((type: "above" | "below", price: number) => {
+    const alert: PriceAlert = {
+      id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
+      type,
+      price,
+      label: type === "above" ? `Alert when price goes above ₹${price}` : `Alert when price falls below ₹${price}`,
+      triggered: false,
+      createdAt: new Date().toISOString(),
+    };
+    save([...alerts, alert]);
+  }, [alerts, save]);
 
-  const removeAlert = useCallback(
-    (id: string) => {
-      save(alerts.filter((a) => a.id !== id));
-    },
-    [alerts, save]
-  );
+  const removeAlert = useCallback((id: string) => {
+    save(alerts.filter((a) => a.id !== id));
+  }, [alerts, save]);
 
   return { alerts, addAlert, removeAlert };
 }

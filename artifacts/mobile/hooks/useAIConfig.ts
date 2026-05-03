@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type AIProvider = "openai" | "anthropic" | "ollama" | "custom";
-
 export type DataSourceMode = "deterministic" | "manual" | "remote";
+export type ProductPrice = { key: string; label: string; price: string };
 
 export type AIConfig = {
   enabled: boolean;
@@ -19,6 +19,7 @@ export type AIConfig = {
   marketDatasetUrl: string;
   marketDatasetFormat: "csv" | "json";
   marketDatasetNotes: string;
+  productPrices: ProductPrice[];
 };
 
 export const DEFAULT_AI_CONFIG: AIConfig = {
@@ -35,10 +36,13 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
   marketDatasetUrl: "",
   marketDatasetFormat: "csv",
   marketDatasetNotes: "",
+  productPrices: [
+    { key: "A", label: "Product A", price: "3600" },
+    { key: "B", label: "Product B", price: "" },
+  ],
 };
 
-const CONFIG_KEY = "@jaggery_ai_config_v3";
-
+const CONFIG_KEY = "@jaggery_ai_config_v4";
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN ?? "localhost"}/api`;
 
 export function getApiBase(): string {
@@ -81,16 +85,10 @@ export function getBaseUrlPlaceholder(provider: AIProvider): string {
 function normalizeConfig(next: Partial<AIConfig>): Partial<AIConfig> {
   if (!next.provider) return next;
   if (next.provider === "openai" || next.provider === "anthropic") {
-    return {
-      ...next,
-      baseUrl: "",
-    };
+    return { ...next, baseUrl: "" };
   }
   if (next.provider === "ollama") {
-    return {
-      ...next,
-      baseUrl: next.baseUrl ?? "http://localhost:11434",
-    };
+    return { ...next, baseUrl: next.baseUrl ?? "http://localhost:11434" };
   }
   return next;
 }
@@ -112,12 +110,8 @@ export function useAIConfig() {
 
   const updateConfig = useCallback(async (updates: Partial<AIConfig>) => {
     const merged = { ...config, ...normalizeConfig(updates) };
-    if (merged.provider === "openai" || merged.provider === "anthropic") {
-      merged.baseUrl = "";
-    }
-    if (merged.provider === "ollama" && !merged.baseUrl) {
-      merged.baseUrl = "http://localhost:11434";
-    }
+    if (merged.provider === "openai" || merged.provider === "anthropic") merged.baseUrl = "";
+    if (merged.provider === "ollama" && !merged.baseUrl) merged.baseUrl = "http://localhost:11434";
     setConfig(merged);
     await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
   }, [config]);
@@ -127,9 +121,7 @@ export function useAIConfig() {
     await AsyncStorage.removeItem(CONFIG_KEY);
   }, []);
 
-  const manualPrice = config.useManualPrice && config.manualPrice
-    ? parseFloat(config.manualPrice)
-    : null;
+  const manualPrice = config.useManualPrice && config.manualPrice ? parseFloat(config.manualPrice) : null;
 
   return { config, loading, updateConfig, resetConfig, manualPrice };
 }
