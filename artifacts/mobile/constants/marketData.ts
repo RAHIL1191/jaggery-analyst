@@ -17,6 +17,24 @@ export type MarketSignal = {
   value: string;
   sentiment: "bullish" | "bearish" | "neutral";
   weight: number;
+  category: "technical" | "festival" | "harvest" | "macro";
+};
+
+export type Festival = {
+  name: string;
+  date: string;
+  daysUntil: number;
+  impact: "high" | "medium" | "low";
+  demandBoost: number;
+  description: string;
+};
+
+export type HarvestInfo = {
+  phase: string;
+  region: string;
+  description: string;
+  priceEffect: "bullish" | "bearish" | "neutral";
+  intensity: number;
 };
 
 export type Recommendation = "BUY" | "SELL" | "HOLD";
@@ -39,109 +57,267 @@ export type MarketSnapshot = {
   lastUpdated: string;
   targetPrice: number;
   stopLoss: number;
+  upcomingFestivals: Festival[];
+  harvestInfo: HarvestInfo;
+  festivalScore: number;
+  harvestScore: number;
 };
 
 function generatePriceHistory(): PricePoint[] {
-  const basePrice = 4180;
-  const days = 30;
-  const points: PricePoint[] = [];
   const today = new Date();
-
-  let price = basePrice - 320;
-  for (let i = days; i >= 0; i--) {
+  const month = today.getMonth();
+  const basePrices: Record<number, number> = {
+    0: 4400, 1: 4200, 2: 4000, 3: 3800, 4: 3700, 5: 3650,
+    6: 3750, 7: 3900, 8: 4100, 9: 4300, 10: 4600, 11: 4800,
+  };
+  const base = basePrices[month] ?? 4200;
+  const points: PricePoint[] = [];
+  let price = base - 200;
+  for (let i = 30; i >= 0; i--) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const seasonal = Math.sin((d.getMonth() / 12) * Math.PI * 2) * 80;
-    const noise = (Math.random() - 0.48) * 60;
-    price = Math.max(3600, Math.min(5200, price + noise + seasonal * 0.1));
-
-    const label = i === 0 ? "Today" : `${i}d ago`;
-    points.push({
-      date: d.toISOString().split("T")[0],
-      price: Math.round(price),
-      label,
-    });
+    const noise = (Math.random() - 0.47) * 55;
+    price = Math.max(3500, Math.min(5500, price + noise));
+    const label = i === 0 ? "Today" : `${i}d`;
+    points.push({ date: d.toISOString().split("T")[0], price: Math.round(price), label });
   }
   return points;
 }
 
-function computeRecommendation(history: PricePoint[]): {
-  recommendation: Recommendation;
-  confidence: number;
-  signals: MarketSignal[];
-  targetPrice: number;
-  stopLoss: number;
-} {
-  const prices = history.map((p) => p.price);
+function getUpcomingFestivals(today: Date): Festival[] {
+  const year = today.getFullYear();
+  const month = today.getMonth();
+  const day = today.getDate();
+
+  const allFestivals: Array<{ name: string; month: number; day: number; impact: "high" | "medium" | "low"; boost: number; desc: string }> = [
+    { name: "Makar Sankranti", month: 0, day: 14, impact: "high", boost: 18, desc: "Tilgul (jaggery+sesame) sweets are gifted across Maharashtra & Gujarat. Demand spikes 3-4 weeks prior." },
+    { name: "Pongal", month: 0, day: 14, impact: "high", boost: 20, desc: "South Indian harvest festival. Jaggery (vellam) is central — used in pongal dish and sweets. Massive demand in TN & AP." },
+    { name: "Holi", month: 2, day: 14, impact: "medium", boost: 10, desc: "Traditional gujiya sweets use jaggery. Demand rises 2 weeks before in UP & Rajasthan." },
+    { name: "Ram Navami", month: 3, day: 17, impact: "low", boost: 5, desc: "Prasad preparations include jaggery-based sweets. Moderate uptick in temple districts." },
+    { name: "Eid ul-Fitr", month: 3, day: 20, impact: "medium", boost: 8, desc: "Seviyan with jaggery alternative popular. Moderate demand rise in Muslim-majority areas." },
+    { name: "Teej", month: 7, day: 7, impact: "medium", boost: 12, desc: "Rajasthani & UP women's festival. Ghewar and other jaggery-based sweets in high demand." },
+    { name: "Janmashtami", month: 7, day: 16, impact: "medium", boost: 10, desc: "Panchamrit and panjiri (jaggery-based) offerings. Temple mandis see demand boost." },
+    { name: "Ganesh Chaturthi", month: 8, day: 5, impact: "high", boost: 22, desc: "Maharashtra's biggest festival. Modak (jaggery+coconut) is the signature offering. Demand peaks 2 weeks before." },
+    { name: "Navratri", month: 9, day: 3, impact: "high", boost: 15, desc: "Fasting foods include jaggery-based sweets and chikki. 9-day festival drives steady demand." },
+    { name: "Diwali", month: 9, day: 29, impact: "high", boost: 30, desc: "Largest jaggery demand spike of the year. Chikki, ladoo, halwa production peaks. Prices can rise 15-25% in October-November." },
+    { name: "Chhath Puja", month: 10, day: 8, impact: "high", boost: 18, desc: "Bihar & UP festival. Thekua (jaggery wheat cookies) are the primary prasad. Massive local demand in eastern India." },
+    { name: "Kartik Purnima", month: 10, day: 15, impact: "low", boost: 4, desc: "Temple-town festivals use jaggery for prasad. Mild uptick in pilgrimage regions." },
+    { name: "Makar Sankranti", month: 0, day: 14, impact: "high", boost: 18, desc: "Repeats next year." },
+  ];
+
+  const festivals: Festival[] = [];
+
+  for (const f of allFestivals) {
+    let festDate = new Date(year, f.month, f.day);
+    if (festDate < today) {
+      festDate = new Date(year + 1, f.month, f.day);
+    }
+    const diff = Math.round((festDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (diff >= 0 && diff <= 90) {
+      festivals.push({
+        name: f.name,
+        date: festDate.toLocaleDateString("en-IN", { day: "numeric", month: "short" }),
+        daysUntil: diff,
+        impact: f.impact,
+        demandBoost: f.boost,
+        description: f.desc,
+      });
+    }
+  }
+
+  festivals.sort((a, b) => a.daysUntil - b.daysUntil);
+  return festivals.slice(0, 4);
+}
+
+function getHarvestInfo(month: number): HarvestInfo {
+  if (month >= 9 && month <= 11) {
+    return {
+      phase: "Pre-Harvest",
+      region: "North India (UP, Punjab, Haryana)",
+      description: "Sugarcane crop matures Oct–Dec in northern states. Mills begin crushing. Raw jaggery supply starts rising. Prices typically soften from January as supply floods in.",
+      priceEffect: "bearish",
+      intensity: 0.6,
+    };
+  } else if (month >= 0 && month <= 2) {
+    return {
+      phase: "Peak Harvest",
+      region: "Uttar Pradesh & Maharashtra",
+      description: "Jan–Mar is the peak crushing season in UP (Muzaffarnagar) and Maharashtra (Kolhapur). Maximum jaggery production drives prices to seasonal lows. Best time to buy stock cheaply.",
+      priceEffect: "bearish",
+      intensity: 0.85,
+    };
+  } else if (month >= 3 && month <= 5) {
+    return {
+      phase: "South Harvest / North Off-Season",
+      region: "Maharashtra, AP, Karnataka",
+      description: "North India mills wrap up. South India (AP, TN, Karnataka) continues harvesting until May-June. Overall supply tightens in northern markets, prices recover.",
+      priceEffect: "neutral",
+      intensity: 0.4,
+    };
+  } else {
+    return {
+      phase: "Off-Season / Pre-Sowing",
+      region: "All Major States",
+      description: "June–September is off-season. No major crushing activity. Existing stocks deplete. Prices naturally rise heading into the festival season. This is typically the best window to sell stored jaggery.",
+      priceEffect: "bullish",
+      intensity: 0.7,
+    };
+  }
+}
+
+function computeFestivalScore(festivals: Festival[], today: Date): number {
+  let score = 0;
+  for (const fest of festivals) {
+    const urgency = fest.daysUntil <= 14 ? 1.5 : fest.daysUntil <= 30 ? 1.0 : 0.5;
+    const impactMap = { high: 0.3, medium: 0.2, low: 0.1 };
+    score += impactMap[fest.impact] * urgency;
+  }
+  return Math.min(score, 1.0);
+}
+
+function computeRSI(prices: number[]): number {
+  const n = Math.min(14, prices.length - 1);
+  let gains = 0, losses = 0;
+  for (let i = prices.length - n; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+    if (diff > 0) gains += diff;
+    else losses += Math.abs(diff);
+  }
+  if (losses === 0) return 100;
+  return 100 - 100 / (1 + gains / losses);
+}
+
+function buildSignals(
+  prices: number[],
+  month: number,
+  festivals: Festival[],
+  harvestInfo: HarvestInfo
+): MarketSignal[] {
   const current = prices[prices.length - 1];
   const ma7 = prices.slice(-7).reduce((a, b) => a + b, 0) / 7;
   const ma30 = prices.reduce((a, b) => a + b, 0) / prices.length;
-  const weekHigh = Math.max(...prices.slice(-7));
-  const weekLow = Math.min(...prices.slice(-7));
   const rsi = computeRSI(prices);
-  const month = new Date().getMonth();
-  const seasonalScore = getSeasonalScore(month);
+  const nearestFest = festivals[0];
+  const festScore = computeFestivalScore(festivals, new Date());
 
   const signals: MarketSignal[] = [
     {
-      label: "7-Day Moving Avg",
-      value: current > ma7 ? "Above MA7 — Bullish" : "Below MA7 — Bearish",
+      label: "7-Day Moving Average",
+      value: current > ma7
+        ? `₹${Math.round(ma7).toLocaleString("en-IN")} — Price above MA7`
+        : `₹${Math.round(ma7).toLocaleString("en-IN")} — Price below MA7`,
       sentiment: current > ma7 ? "bullish" : "bearish",
-      weight: 0.25,
+      weight: 0.18,
+      category: "technical",
     },
     {
       label: "30-Day Trend",
-      value: ma7 > ma30 ? "Rising trend" : "Falling trend",
+      value: ma7 > ma30 ? "Rising trend — upward momentum" : "Falling trend — downward pressure",
       sentiment: ma7 > ma30 ? "bullish" : "bearish",
-      weight: 0.2,
-    },
-    {
-      label: "RSI (14)",
-      value:
-        rsi < 35
-          ? `${rsi.toFixed(0)} — Oversold`
-          : rsi > 65
-            ? `${rsi.toFixed(0)} — Overbought`
-            : `${rsi.toFixed(0)} — Neutral`,
-      sentiment: rsi < 35 ? "bullish" : rsi > 65 ? "bearish" : "neutral",
-      weight: 0.2,
-    },
-    {
-      label: "Seasonal Demand",
-      value: seasonalScore > 0 ? "Festival season boost" : "Off-season pressure",
-      sentiment: seasonalScore > 0 ? "bullish" : "bearish",
-      weight: 0.2,
-    },
-    {
-      label: "Price vs MSP",
-      value:
-        current > 4000
-          ? "Above floor price"
-          : "Near minimum support price",
-      sentiment: current > 4000 ? "bullish" : "neutral",
       weight: 0.15,
+      category: "technical",
+    },
+    {
+      label: "RSI (14-Period)",
+      value: rsi < 35
+        ? `${rsi.toFixed(0)} — Oversold, reversal likely`
+        : rsi > 65
+          ? `${rsi.toFixed(0)} — Overbought, correction risk`
+          : `${rsi.toFixed(0)} — Neutral zone`,
+      sentiment: rsi < 35 ? "bullish" : rsi > 65 ? "bearish" : "neutral",
+      weight: 0.15,
+      category: "technical",
+    },
+    {
+      label: nearestFest ? `Festival: ${nearestFest.name}` : "Festival Demand",
+      value: nearestFest
+        ? nearestFest.daysUntil === 0
+          ? `Today! Demand at peak (+${nearestFest.demandBoost}%)`
+          : nearestFest.daysUntil <= 14
+            ? `${nearestFest.daysUntil} days away — demand building (+${nearestFest.demandBoost}% boost)`
+            : nearestFest.daysUntil <= 30
+              ? `${nearestFest.daysUntil} days — pre-festival buying soon`
+              : `${nearestFest.daysUntil} days — no immediate pressure`
+        : "No major festivals in next 90 days",
+      sentiment: nearestFest
+        ? nearestFest.daysUntil <= 30
+          ? "bullish"
+          : nearestFest.daysUntil <= 60
+            ? "neutral"
+            : "neutral"
+        : "neutral",
+      weight: 0.22,
+      category: "festival",
+    },
+    {
+      label: `Harvest Phase: ${harvestInfo.phase}`,
+      value: harvestInfo.description.slice(0, 80) + "…",
+      sentiment: harvestInfo.priceEffect,
+      weight: 0.20,
+      category: "harvest",
+    },
+    {
+      label: "MSP vs Market Price",
+      value: current > 4200
+        ? `₹${current.toLocaleString("en-IN")} — Healthy premium above MSP (₹3,600)`
+        : current > 3800
+          ? `₹${current.toLocaleString("en-IN")} — Moderate margin over MSP`
+          : `₹${current.toLocaleString("en-IN")} — Near MSP floor — limited downside`,
+      sentiment: current > 4000 ? "bullish" : "neutral",
+      weight: 0.10,
+      category: "macro",
     },
   ];
 
+  return signals;
+}
+
+function computeRecommendation(signals: MarketSignal[]): {
+  recommendation: Recommendation;
+  confidence: number;
+} {
   let score = 0;
   for (const s of signals) {
     if (s.sentiment === "bullish") score += s.weight;
     else if (s.sentiment === "bearish") score -= s.weight;
   }
-
   let recommendation: Recommendation;
   let confidence: number;
-
-  if (score > 0.2) {
+  if (score > 0.18) {
     recommendation = "BUY";
-    confidence = Math.min(95, Math.round(60 + score * 80));
-  } else if (score < -0.2) {
+    confidence = Math.min(95, Math.round(58 + score * 90));
+  } else if (score < -0.18) {
     recommendation = "SELL";
-    confidence = Math.min(95, Math.round(60 + Math.abs(score) * 80));
+    confidence = Math.min(95, Math.round(58 + Math.abs(score) * 90));
   } else {
     recommendation = "HOLD";
-    confidence = Math.round(55 + Math.abs(score) * 40);
+    confidence = Math.round(52 + Math.abs(score) * 60);
   }
+  return { recommendation, confidence };
+}
+
+export function generateMarketSnapshot(): MarketSnapshot {
+  const today = new Date();
+  const month = today.getMonth();
+  const history = generatePriceHistory();
+  const prices = history.map((p) => p.price);
+  const current = prices[prices.length - 1];
+  const prev = prices[prices.length - 2];
+  const change = current - prev;
+  const changePercent = (change / prev) * 100;
+
+  const upcomingFestivals = getUpcomingFestivals(today);
+  const harvestInfo = getHarvestInfo(month);
+  const festivalScore = computeFestivalScore(upcomingFestivals, today);
+  const harvestScore =
+    harvestInfo.priceEffect === "bullish"
+      ? harvestInfo.intensity
+      : harvestInfo.priceEffect === "bearish"
+        ? -harvestInfo.intensity
+        : 0;
+
+  const signals = buildSignals(prices, month, upcomingFestivals, harvestInfo);
+  const { recommendation, confidence } = computeRecommendation(signals);
 
   const targetPrice =
     recommendation === "BUY"
@@ -155,99 +331,17 @@ function computeRecommendation(history: PricePoint[]): {
       ? Math.round(current * 0.96)
       : Math.round(current * 1.03);
 
-  return { recommendation, confidence, signals, targetPrice, stopLoss };
-}
-
-function computeRSI(prices: number[]): number {
-  const n = Math.min(14, prices.length - 1);
-  let gains = 0;
-  let losses = 0;
-  for (let i = prices.length - n; i < prices.length; i++) {
-    const diff = prices[i] - prices[i - 1];
-    if (diff > 0) gains += diff;
-    else losses += Math.abs(diff);
-  }
-  if (losses === 0) return 100;
-  const rs = gains / losses;
-  return 100 - 100 / (1 + rs);
-}
-
-function getSeasonalScore(month: number): number {
-  const scores: Record<number, number> = {
-    0: 0.5,
-    1: 0.3,
-    2: -0.2,
-    3: -0.3,
-    4: -0.2,
-    5: -0.1,
-    6: 0.1,
-    7: 0.2,
-    8: 0.4,
-    9: 0.6,
-    10: 0.7,
-    11: 0.8,
-  };
-  return scores[month] ?? 0;
-}
-
-export function generateMarketSnapshot(): MarketSnapshot {
-  const history = generatePriceHistory();
-  const prices = history.map((p) => p.price);
-  const current = prices[prices.length - 1];
-  const prev = prices[prices.length - 2];
-  const change = current - prev;
-  const changePercent = (change / prev) * 100;
-  const weekPrices = prices.slice(-7);
-  const monthPrices = prices;
-
-  const { recommendation, confidence, signals, targetPrice, stopLoss } =
-    computeRecommendation(history);
-
   const regions: Region[] = [
-    { name: "Muzaffarnagar", state: "Uttar Pradesh", price: current, change: change, changePercent },
-    {
-      name: "Kolhapur",
-      state: "Maharashtra",
-      price: Math.round(current * 0.97 + (Math.random() - 0.5) * 40),
-      change: Math.round(change * 0.9),
-      changePercent: changePercent * 0.9,
-    },
-    {
-      name: "Sangli",
-      state: "Maharashtra",
-      price: Math.round(current * 0.98 + (Math.random() - 0.5) * 30),
-      change: Math.round(change * 0.85),
-      changePercent: changePercent * 0.85,
-    },
-    {
-      name: "Varanasi",
-      state: "Uttar Pradesh",
-      price: Math.round(current * 1.01 + (Math.random() - 0.5) * 20),
-      change: Math.round(change * 1.05),
-      changePercent: changePercent * 1.05,
-    },
-    {
-      name: "Coimbatore",
-      state: "Tamil Nadu",
-      price: Math.round(current * 1.03 + (Math.random() - 0.5) * 50),
-      change: Math.round(change * 0.7),
-      changePercent: changePercent * 0.7,
-    },
-    {
-      name: "Belgaum",
-      state: "Karnataka",
-      price: Math.round(current * 0.99 + (Math.random() - 0.5) * 35),
-      change: Math.round(change * 1.1),
-      changePercent: changePercent * 1.1,
-    },
+    { name: "Muzaffarnagar", state: "Uttar Pradesh", price: current, change, changePercent },
+    { name: "Kolhapur", state: "Maharashtra", price: Math.round(current * 0.97 + (Math.random() - 0.5) * 40), change: Math.round(change * 0.9), changePercent: changePercent * 0.9 },
+    { name: "Sangli", state: "Maharashtra", price: Math.round(current * 0.98 + (Math.random() - 0.5) * 30), change: Math.round(change * 0.85), changePercent: changePercent * 0.85 },
+    { name: "Varanasi", state: "Uttar Pradesh", price: Math.round(current * 1.01 + (Math.random() - 0.5) * 20), change: Math.round(change * 1.05), changePercent: changePercent * 1.05 },
+    { name: "Coimbatore", state: "Tamil Nadu", price: Math.round(current * 1.03 + (Math.random() - 0.5) * 50), change: Math.round(change * 0.7), changePercent: changePercent * 0.7 },
+    { name: "Belgaum", state: "Karnataka", price: Math.round(current * 0.99 + (Math.random() - 0.5) * 35), change: Math.round(change * 1.1), changePercent: changePercent * 1.1 },
   ];
 
-  const now = new Date();
-  const lastUpdated = now.toLocaleTimeString("en-IN", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const weekPrices = prices.slice(-7);
+  const lastUpdated = today.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true });
 
   return {
     currentPrice: current,
@@ -256,8 +350,8 @@ export function generateMarketSnapshot(): MarketSnapshot {
     changePercent: parseFloat(changePercent.toFixed(2)),
     weekHigh: Math.max(...weekPrices),
     weekLow: Math.min(...weekPrices),
-    monthHigh: Math.max(...monthPrices),
-    monthLow: Math.min(...monthPrices),
+    monthHigh: Math.max(...prices),
+    monthLow: Math.min(...prices),
     volume: `${(Math.random() * 3 + 1.5).toFixed(1)}K MT`,
     recommendation,
     confidence,
@@ -267,5 +361,9 @@ export function generateMarketSnapshot(): MarketSnapshot {
     lastUpdated,
     targetPrice,
     stopLoss,
+    upcomingFestivals,
+    harvestInfo,
+    festivalScore,
+    harvestScore,
   };
 }

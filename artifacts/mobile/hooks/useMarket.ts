@@ -21,9 +21,14 @@ export function useMarket() {
   const refresh = useCallback(() => {
     setLoading(true);
     setTimeout(() => {
-      setSnapshot(generateMarketSnapshot());
-      setLastRefresh(new Date());
-      setLoading(false);
+      try {
+        setSnapshot(generateMarketSnapshot());
+        setLastRefresh(new Date());
+      } catch (e) {
+        console.error("Market snapshot error:", e);
+      } finally {
+        setLoading(false);
+      }
     }, 600);
   }, []);
 
