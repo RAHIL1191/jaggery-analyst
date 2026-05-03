@@ -23,11 +23,25 @@ type ProviderCard = {
   isLocal: boolean;
 };
 
+type DataModeCard = {
+  id: "deterministic" | "manual" | "remote";
+  title: string;
+  subtitle: string;
+  icon: string;
+  color: string;
+};
+
 const PROVIDERS: ProviderCard[] = [
   { id: "openai", label: "OpenAI", icon: "zap", subtitle: "GPT-4o, GPT-4o Mini", color: "#10A37F", isLocal: false },
   { id: "anthropic", label: "Anthropic", icon: "cpu", subtitle: "Claude 3.5, Haiku", color: "#D97706", isLocal: false },
   { id: "ollama", label: "Ollama (Local)", icon: "server", subtitle: "Llama, Phi, Gemma…", color: "#7C3AED", isLocal: true },
   { id: "custom", label: "Custom / LM Studio", icon: "settings", subtitle: "Any OpenAI-compatible", color: "#0284C7", isLocal: true },
+];
+
+const DATA_MODES: DataModeCard[] = [
+  { id: "deterministic", title: "Seasonal Model", subtitle: "Works offline with built-in jaggery seasonality", icon: "activity", color: "#B45309" },
+  { id: "manual", title: "Manual Daily Price", subtitle: "Enter today's mandi rate yourself", icon: "edit-3", color: "#16A34A" },
+  { id: "remote", title: "Live URL / Dataset", subtitle: "Fetch free source URL or import dataset link", icon: "database", color: "#0284C7" },
 ];
 
 const OPENAI_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"];
@@ -39,6 +53,39 @@ function getModelSuggestions(provider: AIProvider): string[] {
   if (provider === "anthropic") return ANTHROPIC_MODELS;
   if (provider === "ollama") return OLLAMA_MODELS;
   return [];
+}
+
+const GUIDE = [
+  {
+    title: "Step 1 — Choose how prices are filled",
+    text: "Use Seasonal Model if you want the app to work fully offline. Use Manual Daily Price if you want to type today's mandi price. Use Live URL / Dataset if you want an external free data source.",
+  },
+  {
+    title: "Step 2 — Free live sources to use",
+    text: "Recommended free sources: Agmarknet (official mandi portal), data.gov.in search results, state mandi CSVs, and other open data pages that expose CSV/JSON downloads. Prefer URLs that return JSON or CSV directly.",
+  },
+  {
+    title: "Step 3 — Dataset import",
+    text: "If you already have history, upload or link a CSV/JSON file with columns like date, mandi, price, grade, and region. One row per day works best.",
+  },
+  {
+    title: "Step 4 — AI provider",
+    text: "For cloud AI, use OpenAI or Anthropic. For local AI on Android, select Ollama or Custom/LM Studio, then enter your phone-accessible IP URL and model name.",
+  },
+  {
+    title: "Step 5 — How the app uses it",
+    text: "The dashboard, tools, calculator, and AI advisor all read the same active data mode. If live URL fails, the app falls back to your dataset, then to manual price, then to seasonal model.",
+  },
+  {
+    title: "Step 6 — What to download",
+    text: "Download a CSV/JSON export from a free source or build your own monthly history sheet. Keep a backup file in Google Drive or local storage so you can re-import later.",
+  },
+];
+
+function getDataModeHint(mode: DataModeCard["id"]): string {
+  if (mode === "deterministic") return "No setup needed. Uses built-in seasonal jaggery price curve and festival pattern.";
+  if (mode === "manual") return "Best for traders: enter today's local mandi price and the app will use it everywhere.";
+  return "Paste a public CSV/JSON URL or a dataset link. The app will try live URL first, then dataset, then fallback.";
 }
 
 export default function SettingsScreen() {
@@ -59,20 +106,14 @@ export default function SettingsScreen() {
 
   const selectProvider = useCallback((provider: AIProvider) => {
     const next: Partial<AIConfig> = { provider, model: "" };
-    if (provider === "openai") {
+    if (provider === "openai" || provider === "anthropic") {
       next.baseUrl = "";
-      next.apiKey = config.provider === "anthropic" ? config.apiKey : config.apiKey;
-    } else if (provider === "anthropic") {
-      next.baseUrl = "";
-      next.apiKey = config.provider === "openai" ? config.apiKey : config.apiKey;
-    } else if (provider === "ollama") {
-      next.baseUrl = config.baseUrl || "http://localhost:11434";
     } else {
-      next.baseUrl = config.baseUrl || "";
+      next.baseUrl = config.baseUrl || (provider === "ollama" ? "http://localhost:11434" : "");
     }
     updateConfig(next);
     setTestResult(null);
-  }, [config.baseUrl, config.provider, updateConfig]);
+  }, [config.baseUrl, updateConfig]);
 
   const testConnection = useCallback(async () => {
     if (!config.enabled) {
@@ -140,7 +181,7 @@ export default function SettingsScreen() {
   }, [config]);
 
   const confirmReset = () => {
-    Alert.alert("Reset All Settings", "This will clear your API key, model config, and manual price. Continue?", [
+    Alert.alert("Reset All Settings", "This will clear your AI, live data source, dataset URL, API key, model config, and manual price. Continue?", [
       { text: "Cancel", style: "cancel" },
       { text: "Reset", style: "destructive", onPress: resetConfig },
     ]);
@@ -157,6 +198,7 @@ export default function SettingsScreen() {
   const selectedProvider = PROVIDERS.find((p) => p.id === config.provider)!;
   const modelSuggestions = getModelSuggestions(config.provider);
   const isLocal = isLocalProvider(config.provider);
+  const selectedMode = DATA_MODES.find((m) => m.id === config.dataSourceMode)!;
 
   return (
     <ScrollView
@@ -171,11 +213,11 @@ export default function SettingsScreen() {
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, { color: colors.foreground }]}>AI & Data Settings</Text>
-          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Configure AI advisor & live price source</Text>
+          <Text style={[styles.subtitle, { color: colors.mutedForeground }]}>Configure AI, live market data, and dataset import</Text>
         </View>
       </View>
 
-      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.sectionHeader}>
           <View style={[styles.sectionIconWrap, { backgroundColor: colors.primary + "18" }]}> 
             <Feather name="cpu" size={18} color={colors.primary} />
@@ -222,9 +264,7 @@ export default function SettingsScreen() {
 
             {!isLocal && (
               <>
-                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                  {config.provider === "openai" ? "OpenAI API Key" : "Anthropic API Key"}
-                </Text>
+                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>API Key</Text>
                 <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
                   <TextInput
                     value={config.apiKey}
@@ -245,9 +285,7 @@ export default function SettingsScreen() {
 
             {isLocal && (
               <>
-                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
-                  {config.provider === "ollama" ? "Ollama Server URL" : "API Base URL"}
-                </Text>
+                <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Server URL</Text>
                 <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
                   <TextInput
                     value={config.baseUrl}
@@ -324,12 +362,165 @@ export default function SettingsScreen() {
               ) : (
                 <Feather name="wifi" size={15} color={selectedProvider.color} />
               )}
-              <Text style={[styles.testBtnText, { color: testing ? colors.mutedForeground : selectedProvider.color }]}>
+              <Text style={[styles.testBtnText, { color: testing ? colors.mutedForeground : selectedProvider.color }]}> 
                 {testing ? "Testing connection…" : "Test Connection"}
               </Text>
             </TouchableOpacity>
           </>
         )}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+        <View style={styles.sectionHeader}>
+          <View style={[styles.sectionIconWrap, { backgroundColor: selectedMode.color + "18" }]}> 
+            <Feather name="database" size={18} color={selectedMode.color} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Market Data Source</Text>
+            <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>{selectedMode.title} · {selectedMode.subtitle}</Text>
+          </View>
+        </View>
+
+        <View style={styles.modeGrid}>
+          {DATA_MODES.map((mode) => (
+            <TouchableOpacity
+              key={mode.id}
+              onPress={() => update("dataSourceMode", mode.id)}
+              style={[styles.modeCard, {
+                backgroundColor: config.dataSourceMode === mode.id ? mode.color + "16" : colors.muted,
+                borderColor: config.dataSourceMode === mode.id ? mode.color : colors.border,
+                borderWidth: config.dataSourceMode === mode.id ? 1.4 : 1,
+              }]}
+            >
+              <Feather name={mode.icon as never} size={18} color={config.dataSourceMode === mode.id ? mode.color : colors.mutedForeground} />
+              <Text style={[styles.modeTitle, { color: config.dataSourceMode === mode.id ? mode.color : colors.foreground }]}>{mode.title}</Text>
+              <Text style={[styles.modeSub, { color: colors.mutedForeground }]}>{mode.subtitle}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+
+        <Text style={[styles.helperTitle, { color: colors.foreground }]}>How it works</Text>
+        {GUIDE.map((item) => (
+          <View key={item.title} style={[styles.guideBlock, { borderColor: colors.border, backgroundColor: colors.background }]}>
+            <Text style={[styles.guideBlockTitle, { color: colors.foreground }]}>{item.title}</Text>
+            <Text style={[styles.guideBlockText, { color: colors.mutedForeground }]}>{item.text}</Text>
+          </View>
+        ))}
+
+        {config.dataSourceMode === "manual" && (
+          <>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Today's Mandi Price (₹/quintal)</Text>
+            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: config.manualPrice ? colors.hold + "60" : colors.border }]}> 
+              <Text style={[styles.rupeePrefix, { color: colors.mutedForeground }]}>₹</Text>
+              <TextInput
+                value={config.manualPrice}
+                onChangeText={(v) => update("manualPrice", v)}
+                placeholder="e.g. 3650"
+                placeholderTextColor={colors.mutedForeground}
+                keyboardType="numeric"
+                style={[styles.input, { color: colors.foreground }]}
+              />
+              <Text style={[styles.rupeePrefix, { color: colors.mutedForeground }]}>/qtl</Text>
+            </View>
+          </>
+        )}
+
+        {config.dataSourceMode === "remote" && (
+          <>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Free live market URL</Text>
+            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
+              <TextInput
+                value={config.marketApiUrl}
+                onChangeText={(v) => update("marketApiUrl", v)}
+                placeholder="https://example.com/jaggery-price.json"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={[styles.input, { color: colors.foreground }]}
+              />
+            </View>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>API key (optional)</Text>
+            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
+              <TextInput
+                value={config.marketApiKey}
+                onChangeText={(v) => update("marketApiKey", v)}
+                placeholder="Bearer token if needed"
+                placeholderTextColor={colors.mutedForeground}
+                secureTextEntry={!showKey}
+                autoCapitalize="none"
+                style={[styles.input, { color: colors.foreground }]}
+              />
+              <TouchableOpacity onPress={() => setShowKey(!showKey)} style={styles.eyeBtn}>
+                <Feather name={showKey ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dataset URL</Text>
+            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
+              <TextInput
+                value={config.marketDatasetUrl}
+                onChangeText={(v) => update("marketDatasetUrl", v)}
+                placeholder="https://drive.google.com/.../history.csv"
+                placeholderTextColor={colors.mutedForeground}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                style={[styles.input, { color: colors.foreground }]}
+              />
+            </View>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dataset format</Text>
+            <View style={styles.formatRow}>
+              {["csv", "json"].map((fmt) => (
+                <TouchableOpacity
+                  key={fmt}
+                  onPress={() => update("marketDatasetFormat", fmt as "csv" | "json")}
+                  style={[styles.formatChip, {
+                    backgroundColor: config.marketDatasetFormat === fmt ? colors.primary + "18" : colors.muted,
+                    borderColor: config.marketDatasetFormat === fmt ? colors.primary : colors.border,
+                  }]}
+                >
+                  <Text style={[styles.formatChipText, { color: config.marketDatasetFormat === fmt ? colors.primary : colors.foreground }]}>{fmt.toUpperCase()}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Dataset notes</Text>
+            <View style={[styles.notesBox, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
+              <TextInput
+                value={config.marketDatasetNotes}
+                onChangeText={(v) => update("marketDatasetNotes", v)}
+                placeholder="Add source name, date range, columns, license"
+                placeholderTextColor={colors.mutedForeground}
+                multiline
+                style={[styles.notesInput, { color: colors.foreground }]}
+              />
+            </View>
+          </>
+        )}
+
+        <View style={[styles.sourceHint, { backgroundColor: colors.primary + "08", borderColor: colors.primary + "20" }]}>
+          <Feather name="info" size={13} color={colors.primary} />
+          <Text style={[styles.sourceHintText, { color: colors.mutedForeground }]}>
+            Free sources to try: Agmarknet, data.gov.in, state mandi CSVs, and public Google Sheets / GitHub raw CSV links. Prefer direct CSV or JSON URLs.
+          </Text>
+        </View>
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}> 
+        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Detailed Guide</Text>
+        <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>Use this to set up live data and import history into the app</Text>
+        {[
+          { title: "A. Get a free live price source", body: "Search Agmarknet mandi prices, data.gov.in datasets, or any open CSV/JSON endpoint that returns daily jaggery or sugarcane-related prices. Copy the direct file/API URL into 'Free live market URL'." },
+          { title: "B. Build a history dataset", body: "Create a CSV with columns like date, mandi, region, price, grade. One row per day is enough. If you already have a spreadsheet, export it as CSV and host it publicly." },
+          { title: "C. Add dataset URL", body: "Paste a public CSV/JSON link in 'Dataset URL'. The app first tries live URL, then dataset URL, then manual price, then built-in seasonal fallback." },
+          { title: "D. Use manual mode", body: "If you trade in one local mandi, choose Manual Daily Price and type today's exact rate. This is the best option when free live sources are not available." },
+          { title: "E. What the app shows", body: "Dashboard, Tools, Calculator, Transport, and AI Advisor all read the same active price source. So once you update the data source here, the whole app updates." },
+          { title: "F. Recommended workflow", body: "Start with Seasonal Model, then switch to Manual when you know the daily rate, and finally move to Remote once you have a stable free data feed or dataset URL." },
+        ].map((item) => (
+          <View key={item.title} style={[styles.guideBlock, { borderColor: colors.border, backgroundColor: colors.background }]}>
+            <Text style={[styles.guideBlockTitle, { color: colors.foreground }]}>{item.title}</Text>
+            <Text style={[styles.guideBlockText, { color: colors.mutedForeground }]}>{item.body}</Text>
+          </View>
+        ))}
       </View>
 
       <TouchableOpacity onPress={confirmReset} style={[styles.resetBtn, { backgroundColor: colors.sell + "10", borderColor: colors.sell + "30" }]}> 
@@ -360,13 +551,29 @@ const styles = StyleSheet.create({
   providerSub: { fontFamily: "Inter_400Regular", fontSize: 11 },
   localBadge: { position: "absolute", top: 8, right: 8, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10 },
   localBadgeText: { fontFamily: "Inter_700Bold", fontSize: 8, letterSpacing: 0.5 },
-  inputRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, height: 46, gap: 6 },
-  input: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 14, height: 46 },
+  inputRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, minHeight: 46, gap: 6 },
+  input: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 14, minHeight: 46 },
   eyeBtn: { padding: 4 },
   modelChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
   modelChipText: { fontFamily: "Inter_500Medium", fontSize: 12 },
   testBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
   testBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
+  modeGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  modeCard: { width: "31.5%", borderRadius: 12, padding: 10, borderWidth: 1, gap: 6 },
+  modeTitle: { fontFamily: "Inter_600SemiBold", fontSize: 12, lineHeight: 16 },
+  modeSub: { fontFamily: "Inter_400Regular", fontSize: 10, lineHeight: 14 },
+  helperTitle: { fontFamily: "Inter_600SemiBold", fontSize: 14, marginTop: 4 },
+  guideBlock: { borderRadius: 12, borderWidth: 1, padding: 12, gap: 5 },
+  guideBlockTitle: { fontFamily: "Inter_600SemiBold", fontSize: 13 },
+  guideBlockText: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
+  rupeePrefix: { fontFamily: "Inter_500Medium", fontSize: 15 },
+  sourceHint: { flexDirection: "row", gap: 8, padding: 12, borderRadius: 12, borderWidth: 1, alignItems: "flex-start" },
+  sourceHintText: { fontFamily: "Inter_400Regular", fontSize: 11, lineHeight: 17, flex: 1 },
+  formatRow: { flexDirection: "row", gap: 8 },
+  formatChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 18, borderWidth: 1 },
+  formatChipText: { fontFamily: "Inter_600SemiBold", fontSize: 12 },
+  notesBox: { borderRadius: 10, borderWidth: 1, padding: 10 },
+  notesInput: { minHeight: 84, textAlignVertical: "top", fontFamily: "Inter_400Regular", fontSize: 13 },
   resetBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 13, borderRadius: 14, borderWidth: 1 },
   resetBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
 });

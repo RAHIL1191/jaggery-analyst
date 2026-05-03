@@ -3,6 +3,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 export type AIProvider = "openai" | "anthropic" | "ollama" | "custom";
 
+export type DataSourceMode = "deterministic" | "manual" | "remote";
+
 export type AIConfig = {
   enabled: boolean;
   provider: AIProvider;
@@ -11,6 +13,12 @@ export type AIConfig = {
   model: string;
   manualPrice: string;
   useManualPrice: boolean;
+  dataSourceMode: DataSourceMode;
+  marketApiUrl: string;
+  marketApiKey: string;
+  marketDatasetUrl: string;
+  marketDatasetFormat: "csv" | "json";
+  marketDatasetNotes: string;
 };
 
 export const DEFAULT_AI_CONFIG: AIConfig = {
@@ -21,9 +29,15 @@ export const DEFAULT_AI_CONFIG: AIConfig = {
   model: "gpt-4o-mini",
   manualPrice: "",
   useManualPrice: false,
+  dataSourceMode: "deterministic",
+  marketApiUrl: "",
+  marketApiKey: "",
+  marketDatasetUrl: "",
+  marketDatasetFormat: "csv",
+  marketDatasetNotes: "",
 };
 
-const CONFIG_KEY = "@jaggery_ai_config_v2";
+const CONFIG_KEY = "@jaggery_ai_config_v3";
 
 const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN ?? "localhost"}/api`;
 
