@@ -120,6 +120,7 @@ function ClassicTabLayout() {
       <Tabs.Screen name="export" options={HIDDEN} />
       <Tabs.Screen name="policy" options={HIDDEN} />
       <Tabs.Screen name="chat" options={HIDDEN} />
+      <Tabs.Screen name="settings" options={HIDDEN} />
     </Tabs>
   );
 }

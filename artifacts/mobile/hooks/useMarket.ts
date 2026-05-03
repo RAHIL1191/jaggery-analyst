@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 import { generateMarketSnapshot, MarketSnapshot } from "@/constants/marketData";
 
 const ALERTS_KEY = "jaggery_alerts_v1";
+const AI_CONFIG_KEY = "@jaggery_ai_config_v2";
 
 export type PriceAlert = {
   id: string;
@@ -13,23 +14,72 @@ export type PriceAlert = {
   createdAt: string;
 };
 
+function applyManualPrice(snapshot: MarketSnapshot, manualPrice: number): MarketSnapshot {
+  const change = manualPrice - snapshot.previousClose;
+  const changePercent = (change / snapshot.previousClose) * 100;
+  return {
+    ...snapshot,
+    currentPrice: manualPrice,
+    change,
+    changePercent: parseFloat(changePercent.toFixed(2)),
+    weekHigh: Math.max(snapshot.weekHigh, manualPrice),
+    weekLow: Math.min(snapshot.weekLow, manualPrice),
+    monthHigh: Math.max(snapshot.monthHigh, manualPrice),
+    monthLow: Math.min(snapshot.monthLow, manualPrice),
+    targetPrice: Math.round(manualPrice * (snapshot.recommendation === "BUY" ? 1.07 : 1.03)),
+    stopLoss: Math.round(manualPrice * 0.965),
+    regions: snapshot.regions.map((r) => ({
+      ...r,
+      price: Math.round(manualPrice * (r.price / snapshot.currentPrice)),
+      change: r.change,
+      changePercent: r.changePercent,
+    })),
+  };
+}
+
+async function loadManualPrice(): Promise<number | null> {
+  try {
+    const raw = await AsyncStorage.getItem(AI_CONFIG_KEY);
+    if (!raw) return null;
+    const config = JSON.parse(raw) as { useManualPrice?: boolean; manualPrice?: string };
+    if (config.useManualPrice && config.manualPrice) {
+      const parsed = parseFloat(config.manualPrice);
+      return isNaN(parsed) ? null : parsed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function useMarket() {
   const [snapshot, setSnapshot] = useState<MarketSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const [manualPriceActive, setManualPriceActive] = useState(false);
 
   const refresh = useCallback(() => {
     setLoading(true);
-    setTimeout(() => {
-      try {
-        setSnapshot(generateMarketSnapshot());
+    Promise.all([
+      new Promise<MarketSnapshot>((resolve) => {
+        setTimeout(() => resolve(generateMarketSnapshot()), 400);
+      }),
+      loadManualPrice(),
+    ])
+      .then(([base, manualPrice]) => {
+        if (manualPrice !== null) {
+          setSnapshot(applyManualPrice(base, manualPrice));
+          setManualPriceActive(true);
+        } else {
+          setSnapshot(base);
+          setManualPriceActive(false);
+        }
         setLastRefresh(new Date());
-      } catch (e) {
+      })
+      .catch((e) => {
         console.error("Market snapshot error:", e);
-      } finally {
-        setLoading(false);
-      }
-    }, 600);
+      })
+      .finally(() => setLoading(false));
   }, []);
 
   useEffect(() => {
@@ -38,7 +88,7 @@ export function useMarket() {
     return () => clearInterval(interval);
   }, [refresh]);
 
-  return { snapshot, loading, refresh, lastRefresh };
+  return { snapshot, loading, refresh, lastRefresh, manualPriceActive };
 }
 
 export function useAlerts() {

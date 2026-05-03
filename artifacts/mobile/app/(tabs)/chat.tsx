@@ -1,5 +1,8 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
-import { View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput, Platform, KeyboardAvoidingView } from "react-native";
+import React, { useState, useRef, useEffect, useCallback } from "react";
+import {
+  View, Text, ScrollView, StyleSheet, TouchableOpacity, TextInput,
+  Platform, KeyboardAvoidingView, ActivityIndicator,
+} from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -7,6 +10,10 @@ import * as Haptics from "expo-haptics";
 import { useColors } from "@/hooks/useColors";
 import { useMarket } from "@/hooks/useMarket";
 import { SEASONAL_MONTHLY } from "@/constants/seasonalData";
+import {
+  useAIConfig, isLocalProvider, getOllamaEndpoint, getCustomEndpoint,
+  getModelPlaceholder, getApiBase,
+} from "@/hooks/useAIConfig";
 
 type Message = { id: string; role: "user" | "assistant"; text: string; timestamp: Date };
 
@@ -21,9 +28,11 @@ const SUGGESTED_QUESTIONS = [
   "Is transport from Muzaffarnagar to Delhi profitable?",
 ];
 
-function generateAdvisorResponse(question: string, snapshot: ReturnType<typeof useMarket>["snapshot"]): string {
+function buildRuleBasedResponse(
+  question: string,
+  snapshot: ReturnType<typeof useMarket>["snapshot"],
+): string {
   if (!snapshot) return "I'm still loading market data. Please try again in a moment.";
-
   const q = question.toLowerCase();
   const price = snapshot.currentPrice;
   const rec = snapshot.recommendation;
@@ -33,49 +42,115 @@ function generateAdvisorResponse(question: string, snapshot: ReturnType<typeof u
   const harvest = snapshot.harvestInfo;
 
   if (q.includes("buy") && (q.includes("now") || q.includes("should") || q.includes("today"))) {
-    if (rec === "BUY") return `✅ Yes — the current signal is BUY (${snapshot.confidence}% confidence).\n\nAt ₹${price.toLocaleString("en-IN")}/qtl, this is a good entry point. Here's why:\n\n• ${seasonal.signal.includes("buy") ? `Seasonal pattern: ${seasonal.month} is historically a "${seasonal.signal.replace("_", " ")}" month (avg ₹${seasonal.avgPrice.toLocaleString("en-IN")}).` : `Current price is within seasonal range.`}\n${festival ? `• Festival demand: ${festival.name} is ${festival.daysUntil} days away — expect +${festival.demandBoost}% demand boost.\n` : ""}• Harvest phase: ${harvest.phase} — ${harvest.priceEffect === "bearish" ? "supply is high, prices are at seasonal lows. Great stocking opportunity." : harvest.priceEffect === "bullish" ? "supply is tightening, prices rising." : "transitional phase."}\n\nTarget: ₹${snapshot.targetPrice.toLocaleString("en-IN")} | Stop Loss: ₹${snapshot.stopLoss.toLocaleString("en-IN")}\n\nSuggestion: Start with 40–50% of your target quantity. Add more if price dips further.`;
-    if (rec === "HOLD") return `⏸️ The signal is HOLD (${snapshot.confidence}% confidence).\n\nCurrent price: ₹${price.toLocaleString("en-IN")}/qtl. Mixed signals right now:\n\n${festival ? `• ${festival.name} is ${festival.daysUntil} days away — demand building but price already pricing it in.\n` : ""}• ${harvest.phase}: ${harvest.description.slice(0, 100)}…\n\nIf you need to buy, consider buying in tranches (e.g., 25% now, 25% in 2 weeks) to average your cost. Don't commit the full quantity at current prices.`;
-    return `⚠️ The signal is SELL (${snapshot.confidence}% confidence).\n\nCurrent price ₹${price.toLocaleString("en-IN")}/qtl may face further downward pressure. ${harvest.priceEffect === "bearish" ? "We're in peak harvest — supply is at maximum and prices are likely to fall further." : ""}\n\nRecommendation: Wait for prices to find a base before buying. Watch for prices near ₹${snapshot.monthLow.toLocaleString("en-IN")} (this month's low) for a better entry.`;
+    if (rec === "BUY") return `✅ Yes — signal is BUY (${snapshot.confidence}% confidence).\n\nAt ₹${price.toLocaleString("en-IN")}/qtl:\n• ${seasonal.signal.includes("buy") ? `${seasonal.month} is historically a "${seasonal.signal.replace("_", " ")}" month (avg ₹${seasonal.avgPrice.toLocaleString("en-IN")}).` : "Within seasonal range."}\n${festival ? `• ${festival.name} in ${festival.daysUntil} days — +${festival.demandBoost}% demand.\n` : ""}• Harvest: ${harvest.phase} — ${harvest.priceEffect}\n\nTarget ₹${snapshot.targetPrice.toLocaleString("en-IN")} | Stop ₹${snapshot.stopLoss.toLocaleString("en-IN")}. Start with 40–50% of target quantity.`;
+    if (rec === "HOLD") return `⏸️ Signal is HOLD (${snapshot.confidence}% confidence).\n\nMixed signals at ₹${price.toLocaleString("en-IN")}. ${festival ? `${festival.name} in ${festival.daysUntil} days — demand building but price may already reflect it.` : ""}\n\nBuy in tranches: 25% now, 25% in 2 weeks to average your cost.`;
+    return `⚠️ Signal is SELL. Wait for a better entry. ${harvest.priceEffect === "bearish" ? "Peak harvest — supply at max, prices may fall further." : ""} Watch for prices near ₹${snapshot.monthLow.toLocaleString("en-IN")} (month low).`;
   }
 
-  if (q.includes("sell") || (q.includes("stock") && q.includes("sell"))) {
-    if (rec === "SELL") return `📉 Yes — the SELL signal is active (${snapshot.confidence}% confidence).\n\nAt ₹${price.toLocaleString("en-IN")}/qtl, current conditions favour selling:\n\n${harvest.priceEffect === "bearish" ? `• New harvest arriving — supply will increase, pushing prices lower.\n` : ""}${!festival ? "• No major festival demand expected in the next 30 days.\n" : `• ${festival.name} in ${festival.daysUntil} days — if you can hold until then, demand may give you +${festival.demandBoost}% more.\n`}\n\nIf your cost of acquisition was below ₹${Math.round(price * 0.92).toLocaleString("en-IN")}/qtl, selling now locks in profit. Don't wait too long.`;
-    if (festival && festival.daysUntil <= 30) return `🎯 Not yet — wait for the festival peak!\n\n${festival.name} is only ${festival.daysUntil} days away. Historical data shows +${festival.demandBoost}% demand boost brings prices up ₹${Math.round(price * festival.demandBoost / 100).toLocaleString("en-IN")}–₹${Math.round(price * festival.demandBoost * 1.2 / 100).toLocaleString("en-IN")}/qtl.\n\nCurrent price: ₹${price.toLocaleString("en-IN")} → Festival peak estimate: ₹${Math.round(price * (1 + festival.demandBoost / 200)).toLocaleString("en-IN")}–₹${Math.round(price * (1 + festival.demandBoost / 150)).toLocaleString("en-IN")}/qtl.\n\nHold if your storage costs allow. Sell 1–2 weeks after the festival to catch the peak, not the day of.`;
-    return `📊 Hold your stock for now. Current signal is ${rec}.\n\nThe best sell months historically are October–November (Diwali + Chhath season). This year, target selling when price reaches ₹${snapshot.targetPrice.toLocaleString("en-IN")}/qtl.\n\nSeasonal context: ${seasonal.month} average is ₹${seasonal.avgPrice.toLocaleString("en-IN")}. Current price ₹${price.toLocaleString("en-IN")} is ${price > seasonal.avgPrice ? "ABOVE average — good for sellers." : "BELOW average — better to wait."}`;
+  if (q.includes("sell") || q.includes("when") && q.includes("sell")) {
+    if (festival && festival.daysUntil <= 30) return `🎯 Hold! ${festival.name} is ${festival.daysUntil} days away.\n\nFestival demand: +${festival.demandBoost}% → potential +₹${Math.round(price * festival.demandBoost / 200).toLocaleString("en-IN")}–₹${Math.round(price * festival.demandBoost / 150).toLocaleString("en-IN")}/qtl.\n\nSell 1–2 weeks after festival peak for best price.`;
+    if (rec === "SELL") return `📉 SELL signal active (${snapshot.confidence}% confidence). Current ₹${price.toLocaleString("en-IN")}/qtl. ${harvest.priceEffect === "bearish" ? "New harvest increasing supply — prices may fall." : ""} If cost < ₹${Math.round(price * 0.92).toLocaleString("en-IN")}/qtl, selling now locks profit.`;
+    return `Hold for Oct–Nov festival peak (Diwali, Chhath). Target ₹${snapshot.targetPrice.toLocaleString("en-IN")}/qtl.\n\n${seasonal.month} avg: ₹${seasonal.avgPrice.toLocaleString("en-IN")}. Current ₹${price.toLocaleString("en-IN")} is ${price > seasonal.avgPrice ? "ABOVE average — good for sellers." : "BELOW average — better to wait."}`;
   }
 
-  if (q.includes("festival") || q.includes("diwali") || q.includes("pongal") || q.includes("demand")) {
+  if (q.includes("festival") || q.includes("diwali") || q.includes("demand")) {
     const festivals = snapshot.upcomingFestivals;
-    if (festivals.length === 0) return `No major festivals in the next 90 days. This is a quieter demand period — focus on building inventory for the next festival cycle.\n\nNext high-impact period: September–November (Ganesh Chaturthi → Navratri → Diwali → Chhath) is the biggest jaggery demand window of the year. Stock up in June–August at off-season prices.`;
-    return `🎉 Upcoming Festivals & Price Impact:\n\n${festivals.map((f) => `• **${f.name}** — ${f.daysUntil === 0 ? "TODAY" : `${f.daysUntil} days`}\n  Impact: ${f.impact.toUpperCase()} · +${f.demandBoost}% demand boost\n  ${f.description}`).join("\n\n")}\n\nRule of thumb: Stock 4–6 weeks before a HIGH-impact festival. Prices peak 1–2 weeks before the festival date, then cool off. Don't wait till the day of.`;
+    if (!festivals.length) return "No major festivals in next 90 days. Build inventory for Sep–Nov (Ganesh Chaturthi → Navratri → Diwali → Chhath) — the biggest jaggery demand season.";
+    return `🎉 Upcoming Festivals:\n\n${festivals.map((f) => `• ${f.name} — ${f.daysUntil === 0 ? "TODAY" : `${f.daysUntil} days`}\n  Impact: ${f.impact.toUpperCase()} · +${f.demandBoost}% demand\n  ${f.description.slice(0, 80)}…`).join("\n\n")}\n\nRule: Stock 4–6 weeks before a HIGH-impact festival. Sell 1–2 weeks before the date.`;
   }
 
-  if (q.includes("grade") || q.includes("quality") || q.includes("a grade") || q.includes("b grade")) {
-    return `🏆 Grade Trading Strategy:\n\n**Grade A (Golden, >75% sucrose)**\n• Price: ~₹${Math.round(price * 1.15).toLocaleString("en-IN")}/qtl\n• Best for: Export (UK, USA, UAE), premium confectioners\n• Return: 15% premium over Grade B\n\n**Grade B (Standard)** — ₹${price.toLocaleString("en-IN")}/qtl\n• Best for: Domestic wholesale, retail market\n• Most liquid — easiest to sell\n\n**Grade C (Dark/Coarse)** — ₹${Math.round(price * 0.88).toLocaleString("en-IN")}/qtl\n• Avoid unless you have a specific industrial buyer lined up\n\n💡 Tip: If you can upgrade from Grade B to Grade A through better cane selection and processing, the ₹${Math.round(price * 0.15).toLocaleString("en-IN")}/qtl premium adds up fast on 100+ quintal batches.`;
+  if (q.includes("grade") || q.includes("quality")) {
+    return `🏆 Grade Strategy:\n\n• Grade A (Golden): ~₹${Math.round(price * 1.15).toLocaleString("en-IN")}/qtl — Export, premium confectioners (+15%)\n• Grade B (Standard): ₹${price.toLocaleString("en-IN")}/qtl — Most liquid, domestic wholesale\n• Grade C (Dark): ~₹${Math.round(price * 0.88).toLocaleString("en-IN")}/qtl — Avoid unless industrial buyer confirmed\n\nUpgrading B→A on 100 qtl adds ₹${Math.round(price * 0.15 * 100).toLocaleString("en-IN")} revenue.`;
   }
 
-  if (q.includes("export") || q.includes("international") || q.includes("uk") || q.includes("usa") || q.includes("abroad")) {
-    return `🌍 Export Profit Opportunity:\n\nDomestic price today: ₹${price.toLocaleString("en-IN")}/qtl\n\n**Top export premiums:**\n• UK/USA (Organic Grade A): +48–55% → ₹${Math.round(price * 1.52).toLocaleString("en-IN")}–₹${Math.round(price * 1.55).toLocaleString("en-IN")}/qtl FOB\n• UAE/Gulf (Halal Grade A): +22% → ₹${Math.round(price * 1.22).toLocaleString("en-IN")}/qtl FOB\n• Bangladesh (Grade B/C): +12% → ₹${Math.round(price * 1.12).toLocaleString("en-IN")}/qtl FOB\n\n**To access export markets:**\n1. Get APEDA registration (apeda.gov.in)\n2. Get FSSAI export certificate\n3. For organic: get organic certification (APOF/IMO)\n4. Contact export agents in Muzaffarnagar or Kolhapur\n\nOrganics are the highest-margin opportunity — the ₹${Math.round(price * 0.55).toLocaleString("en-IN")}/qtl premium easily covers certification costs.`;
+  if (q.includes("export") || q.includes("international")) {
+    return `🌍 Export Premiums over ₹${price.toLocaleString("en-IN")} domestic:\n\n• UK/USA (Organic A): +48–55% → ₹${Math.round(price * 1.52).toLocaleString("en-IN")}–₹${Math.round(price * 1.55).toLocaleString("en-IN")}/qtl FOB\n• UAE (Halal A): +22% → ₹${Math.round(price * 1.22).toLocaleString("en-IN")}/qtl\n• Bangladesh (B/C): +12% → ₹${Math.round(price * 1.12).toLocaleString("en-IN")}/qtl\n\nNeeds APEDA registration. Organic cert adds biggest premium.`;
   }
 
-  if (q.includes("harvest") || q.includes("season") || q.includes("crushing")) {
-    return `🌾 Harvest Season Explained:\n\n**${harvest.phase}** (${harvest.region})\n${harvest.description}\n\n**Price effect:** ${harvest.priceEffect.toUpperCase()}\n\n📅 Annual Cycle:\n• Oct–Dec: Pre-harvest, mills start, supply building → bearish\n• Jan–Mar: PEAK harvest in UP & Maharashtra → LOWEST prices → BEST BUY window\n• Apr–Jun: South harvest, north off-season → prices recovering → HOLD/SELL\n• Jul–Sep: Off-season, stocks depleting → prices rising → SELL stored stock\n\nCurrent month (${seasonal.month}): ${seasonal.notes}`;
+  return `📊 Market Summary:\n\n• Price: ₹${price.toLocaleString("en-IN")}/qtl\n• Signal: ${rec} (${snapshot.confidence}%)\n• Harvest: ${harvest.phase}\n${festival ? `• Festival: ${festival.name} in ${festival.daysUntil} days (+${festival.demandBoost}%)\n` : ""}• ${seasonal.month}: historically "${seasonal.signal.replace("_", " ")}"\n\nTry: "Should I buy now?", "Best time to sell?", "Export opportunities?"`;
+}
+
+async function callAI(
+  question: string,
+  history: Message[],
+  config: ReturnType<typeof useAIConfig>["config"],
+  snapshot: ReturnType<typeof useMarket>["snapshot"],
+): Promise<string> {
+  const month = new Date().getMonth();
+  const seasonal = snapshot ? SEASONAL_MONTHLY[month] : null;
+  const festival = snapshot?.upcomingFestivals[0];
+  const harvest = snapshot?.harvestInfo;
+
+  const context = snapshot ? {
+    currentPrice: snapshot.currentPrice,
+    recommendation: snapshot.recommendation,
+    confidence: snapshot.confidence,
+    harvestPhase: harvest?.phase,
+    harvestRegion: harvest?.region,
+    harvestEffect: harvest?.priceEffect,
+    upcomingFestival: festival?.name,
+    festivalDays: festival?.daysUntil,
+    festivalBoost: festival?.demandBoost,
+    seasonalMonth: seasonal?.month,
+    seasonalSignal: seasonal?.signal,
+    mandiPrices: snapshot.regions?.map((r) => `${r.name}:₹${r.price}`).join(", "),
+  } : {};
+
+  const messages = [
+    ...history.slice(-10).map((m) => ({ role: m.role as "user" | "assistant", content: m.text })),
+    { role: "user" as const, content: question },
+  ];
+
+  if (isLocalProvider(config.provider)) {
+    const endpoint = config.provider === "ollama"
+      ? getOllamaEndpoint(config.baseUrl)
+      : getCustomEndpoint(config.baseUrl);
+
+    const systemPrompt = `You are a jaggery market expert. Current: ₹${snapshot?.currentPrice ?? "?"}/qtl, Signal: ${snapshot?.recommendation ?? "?"}, Harvest: ${harvest?.phase ?? "?"}.${festival ? ` Festival: ${festival.name} in ${festival.daysUntil} days.` : ""} Be concise and practical. Quote prices in ₹/quintal.`;
+
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (config.apiKey) headers["Authorization"] = `Bearer ${config.apiKey}`;
+
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        model: config.model || getModelPlaceholder(config.provider),
+        messages: [{ role: "system", content: systemPrompt }, ...messages],
+        max_tokens: 600,
+        stream: false,
+        temperature: 0.65,
+      }),
+    });
+
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`Local LLM error (${res.status}): ${text.slice(0, 200)}`);
+    }
+
+    const data = await res.json() as { choices: { message: { content: string } }[] };
+    return data?.choices?.[0]?.message?.content ?? "No response from model.";
   }
 
-  if (q.includes("profit") || q.includes("money") || q.includes("earn") || q.includes("maximise") || q.includes("maximize")) {
-    const festProfit = festival ? Math.round(price * festival.demandBoost / 100) : 0;
-    return `💰 Profit Maximisation Strategy:\n\n**Step 1: Buy at seasonal low (Feb)**\nHistorical average: ₹3,650/qtl. This year aim for ₹${Math.round(price * 0.88).toLocaleString("en-IN")}–₹${Math.round(price * 0.92).toLocaleString("en-IN")}/qtl.\n\n**Step 2: Choose Grade A or Organic**\nGrade A gets ₹${Math.round(price * 0.15).toLocaleString("en-IN")}/qtl more. Organic gets 28% more for export.\n\n**Step 3: Store efficiently**\nUse lowest-cost cold storage (₹30–38/qtl/month in Muzaffarnagar). For 3 months: ₹${90 * 35}/qtl storage cost.\n\n**Step 4: Sell at festival peak (Oct–Nov)**\nDiwali season historically adds ₹800–1,200/qtl above Feb lows.${festival ? `\n\n**Upcoming opportunity:** ${festival.name} in ${festival.daysUntil} days could add +₹${festProfit.toLocaleString("en-IN")}/qtl.` : ""}\n\n**Step 5: Export for maximum premium**\nExport to UK/USA as organic = 48–55% above domestic. Best ROI path.`;
+  const res = await fetch(`${getApiBase()}/ai/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages,
+      provider: config.provider,
+      apiKey: config.apiKey,
+      model: config.model || getModelPlaceholder(config.provider),
+      context,
+    }),
+  });
+
+  if (!res.ok) {
+    const data = await res.json() as { error: string };
+    throw new Error(data.error ?? `Server error ${res.status}`);
   }
 
-  if (q.includes("transport") || q.includes("muzaffarnagar") || q.includes("delhi")) {
-    return `🚛 Muzaffarnagar to Delhi NCR Transport:\n\nDistance: ~120 km\nMode: Road (most common)\n\n**Cost breakdown (per 100 quintals = 10 MT):**\n• Freight: ₹3.2/km/MT × 120 km × 10 MT = ₹3,840\n• Loading/Unloading: ₹280/MT × 10 MT = ₹2,800\n• Toll: ~₹480 (1 truck)\n• **Total transport: ₹7,120 = ₹71/quintal**\n\nLanded cost: ₹${(price + 71).toLocaleString("en-IN")}/qtl in Delhi\n\n**Is it viable?** Delhi market typically pays ₹50–150/qtl more than Muzaffarnagar mandi for same grade jaggery (logistics convenience premium). With ₹71/qtl transport cost, this route has thin margins unless you have a direct buyer in Delhi.\n\n💡 Consider: Direct sales to Delhi-based halwais or sweet shops can fetch ₹200–300/qtl premium.`;
-  }
-
-  if (q.includes("storage") || q.includes("cold storage") || q.includes("stock")) {
-    return `🏭 Storage Strategy:\n\n**Best value storage rates by region:**\n• Muzaffarnagar (UP): ₹30–38/qtl/month\n• Kolhapur (MH): ₹35–42/qtl/month\n• Erode (TN): ₹38–44/qtl/month\n\n**Stocking signal today:** ${snapshot.recommendation === "BUY" ? "✅ STOCK NOW" : snapshot.recommendation === "HOLD" ? "⏸️ PARTIAL STOCK" : "⚠️ WAIT — prices may fall"}\n\n**3-month storage economics:**\nStorage cost: ~₹35/qtl × 3 months = ₹105/qtl\nExpected price gain (off-season): ₹300–500/qtl\n**Net profit from storage: ₹195–395/qtl**\n\n💡 Only stock when the expected price gain exceeds storage cost + opportunity cost of capital.`;
-  }
-
-  return `📊 Here's my analysis based on today's market:\n\n**Current Price:** ₹${price.toLocaleString("en-IN")}/qtl\n**Signal:** ${rec} (${snapshot.confidence}% confidence)\n**Harvest Phase:** ${harvest.phase}\n${festival ? `**Next Festival:** ${festival.name} in ${festival.daysUntil} days (+${festival.demandBoost}% demand)\n` : ""}**Seasonal Context:** ${seasonal.month} is typically a "${seasonal.signal.replace("_", " ")}" month with average price ₹${seasonal.avgPrice.toLocaleString("en-IN")}.\n\nTry asking me something specific like:\n• "Should I buy now?"\n• "When is the best time to sell?"\n• "How do festivals affect prices?"\n• "How to maximise export profit?"`;
+  const data = await res.json() as { content: string };
+  return data.content ?? "No response.";
 }
 
 export default function ChatScreen() {
@@ -83,97 +158,186 @@ export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { snapshot } = useMarket();
+  const { config } = useAIConfig();
   const scrollRef = useRef<ScrollView>(null);
   const topPad = Platform.OS === "web" ? 67 : insets.top;
+
+  const aiActive = config.enabled && (
+    isLocalProvider(config.provider) ? !!config.baseUrl : !!config.apiKey
+  );
 
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
       role: "assistant",
-      text: "👋 Namaskar! I'm your AI Jaggery Market Advisor.\n\nI have access to today's live market data, seasonal trends, festival calendar, and harvest patterns. Ask me anything about buying, selling, storage, export, or market strategy!",
+      text: `👋 Namaskar! I'm your Jaggery Market Advisor.\n\n${aiActive ? `AI powered by ${config.provider === "openai" ? "OpenAI" : config.provider === "anthropic" ? "Anthropic" : config.provider === "ollama" ? "Ollama (local)" : "Custom LLM"} (${config.model || getModelPlaceholder(config.provider)}). Ask me anything!` : "Using built-in market analysis. Configure AI in Settings → Tools → AI & Data Settings for smarter, conversational responses."}`,
       timestamp: new Date(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     scrollRef.current?.scrollToEnd({ animated: true });
   }, [messages, isTyping]);
 
-  const sendMessage = (text: string) => {
+  const sendMessage = useCallback(async (text: string) => {
     const userText = text.trim();
-    if (!userText) return;
+    if (!userText || isTyping) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInput("");
+    setError(null);
 
     const userMsg: Message = { id: `u_${Date.now()}`, role: "user", text: userText, timestamp: new Date() };
     setMessages((m) => [...m, userMsg]);
     setIsTyping(true);
 
-    setTimeout(() => {
-      const response = generateAdvisorResponse(userText, snapshot);
-      const assistantMsg: Message = { id: `a_${Date.now()}`, role: "assistant", text: response, timestamp: new Date() };
+    try {
+      let responseText: string;
+
+      if (aiActive) {
+        responseText = await callAI(userText, messages, config, snapshot);
+      } else {
+        await new Promise((r) => setTimeout(r, 700 + Math.random() * 300));
+        responseText = buildRuleBasedResponse(userText, snapshot);
+      }
+
+      const assistantMsg: Message = {
+        id: `a_${Date.now()}`,
+        role: "assistant",
+        text: responseText,
+        timestamp: new Date(),
+      };
       setMessages((m) => [...m, assistantMsg]);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      setError(msg);
+      const errMsg: Message = {
+        id: `err_${Date.now()}`,
+        role: "assistant",
+        text: `⚠️ AI Error: ${msg}\n\nFalling back to built-in analysis:\n\n${buildRuleBasedResponse(userText, snapshot)}`,
+        timestamp: new Date(),
+      };
+      setMessages((m) => [...m, errMsg]);
+    } finally {
       setIsTyping(false);
-    }, 900 + Math.random() * 400);
-  };
+    }
+  }, [messages, config, snapshot, aiActive, isTyping]);
+
+  const providerColor = config.provider === "openai" ? "#10A37F"
+    : config.provider === "anthropic" ? "#D97706"
+    : config.provider === "ollama" ? "#7C3AED"
+    : "#0284C7";
 
   return (
-    <KeyboardAvoidingView style={[styles.root, { backgroundColor: colors.background }]} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={0}>
+    <KeyboardAvoidingView
+      style={[styles.root, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+    >
+      {/* Top Bar */}
       <View style={[styles.topBar, { paddingTop: topPad + 12, backgroundColor: colors.background, borderBottomColor: colors.border }]}>
         <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: colors.muted }]}>
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
         <View style={styles.topBarCenter}>
-          <View style={[styles.aiAvatar, { backgroundColor: colors.primary + "20" }]}>
-            <Feather name="cpu" size={18} color={colors.primary} />
+          <View style={[styles.aiAvatar, { backgroundColor: aiActive ? providerColor + "20" : colors.muted }]}>
+            <Feather name={aiActive ? "cpu" : "message-circle"} size={18} color={aiActive ? providerColor : colors.mutedForeground} />
           </View>
-          <View>
-            <Text style={[styles.topBarTitle, { color: colors.foreground }]}>AI Market Advisor</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.topBarTitle, { color: colors.foreground }]}>Market Advisor</Text>
             <View style={styles.onlineRow}>
-              <View style={[styles.onlineDot, { backgroundColor: colors.buy }]} />
+              <View style={[styles.onlineDot, { backgroundColor: aiActive ? providerColor : colors.hold }]} />
               <Text style={[styles.onlineText, { color: colors.mutedForeground }]}>
-                {snapshot ? `Live · ₹${snapshot.currentPrice.toLocaleString("en-IN")}/qtl · ${snapshot.recommendation}` : "Loading market data…"}
+                {aiActive
+                  ? `${config.provider === "ollama" ? "Ollama" : config.provider === "custom" ? "Custom LLM" : config.provider === "openai" ? "OpenAI" : "Anthropic"} · ${config.model || getModelPlaceholder(config.provider)}`
+                  : "Built-in analysis · Configure AI in Settings"}
               </Text>
             </View>
           </View>
+          <TouchableOpacity onPress={() => router.push("/(tabs)/settings")} style={[styles.settingsBtn, { backgroundColor: colors.muted }]}>
+            <Feather name="settings" size={15} color={colors.mutedForeground} />
+          </TouchableOpacity>
         </View>
       </View>
 
-      <ScrollView ref={scrollRef} style={styles.messageList} contentContainerStyle={[styles.messageContent, { paddingBottom: Platform.OS === "web" ? 100 : insets.bottom + 130 }]} showsVerticalScrollIndicator={false}>
+      {/* AI not configured banner */}
+      {!aiActive && config.enabled && (
+        <TouchableOpacity onPress={() => router.push("/(tabs)/settings")} style={[styles.configBanner, { backgroundColor: colors.hold + "12", borderColor: colors.hold + "30" }]}>
+          <Feather name="alert-circle" size={13} color={colors.hold} />
+          <Text style={[styles.configBannerText, { color: colors.hold }]}>
+            AI enabled but {isLocalProvider(config.provider) ? "Base URL" : "API key"} not set. Tap to configure →
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {!config.enabled && (
+        <TouchableOpacity onPress={() => router.push("/(tabs)/settings")} style={[styles.configBanner, { backgroundColor: colors.primary + "10", borderColor: colors.primary + "25" }]}>
+          <Feather name="zap" size={13} color={colors.primary} />
+          <Text style={[styles.configBannerText, { color: colors.primary }]}>
+            Connect AI (OpenAI, Anthropic, or local Ollama) for smarter advice → Settings
+          </Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Messages */}
+      <ScrollView
+        ref={scrollRef}
+        style={styles.messageList}
+        contentContainerStyle={[styles.messageContent, { paddingBottom: Platform.OS === "web" ? 100 : insets.bottom + 130 }]}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
         {messages.map((msg) => (
-          <View key={msg.id} style={[styles.messageBubble, msg.role === "user" ? styles.userBubble : styles.assistantBubble, { backgroundColor: msg.role === "user" ? colors.primary : colors.card, borderColor: msg.role === "user" ? "transparent" : colors.border }]}>
+          <View
+            key={msg.id}
+            style={[
+              styles.bubble,
+              msg.role === "user" ? styles.userBubble : styles.aiBubble,
+              {
+                backgroundColor: msg.role === "user" ? colors.primary : colors.card,
+                borderColor: msg.role === "user" ? "transparent" : colors.border,
+              },
+            ]}
+          >
             {msg.role === "assistant" && (
-              <View style={[styles.botAvatarSmall, { backgroundColor: colors.primary + "15" }]}>
-                <Feather name="cpu" size={12} color={colors.primary} />
+              <View style={[styles.botIcon, { backgroundColor: aiActive ? providerColor + "18" : colors.muted }]}>
+                <Feather name={aiActive ? "cpu" : "message-circle"} size={11} color={aiActive ? providerColor : colors.mutedForeground} />
               </View>
             )}
-            <Text style={[styles.messageText, { color: msg.role === "user" ? colors.primaryForeground : colors.foreground }]}>{msg.text}</Text>
-            <Text style={[styles.msgTime, { color: msg.role === "user" ? colors.primaryForeground + "80" : colors.mutedForeground }]}>
+            <Text style={[styles.bubbleText, { color: msg.role === "user" ? colors.primaryForeground : colors.foreground }]}>
+              {msg.text}
+            </Text>
+            <Text style={[styles.bubbleTime, { color: msg.role === "user" ? colors.primaryForeground + "80" : colors.mutedForeground }]}>
               {msg.timestamp.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true })}
             </Text>
           </View>
         ))}
+
         {isTyping && (
-          <View style={[styles.messageBubble, styles.assistantBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <View style={[styles.botAvatarSmall, { backgroundColor: colors.primary + "15" }]}>
-              <Feather name="cpu" size={12} color={colors.primary} />
+          <View style={[styles.bubble, styles.aiBubble, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.botIcon, { backgroundColor: aiActive ? providerColor + "18" : colors.muted }]}>
+              <Feather name="cpu" size={11} color={aiActive ? providerColor : colors.mutedForeground} />
             </View>
-            <View style={styles.typingDots}>
-              {[0, 1, 2].map((i) => (
-                <View key={i} style={[styles.dot, { backgroundColor: colors.mutedForeground }]} />
-              ))}
+            <View style={styles.typingRow}>
+              <ActivityIndicator size="small" color={aiActive ? providerColor : colors.mutedForeground} />
+              <Text style={[styles.typingText, { color: colors.mutedForeground }]}>
+                {aiActive ? "Thinking…" : "Analysing…"}
+              </Text>
             </View>
           </View>
         )}
 
-        {messages.length === 1 && (
-          <View style={styles.suggestionsWrap}>
+        {messages.length === 1 && !isTyping && (
+          <View style={styles.suggestions}>
             <Text style={[styles.suggestLabel, { color: colors.mutedForeground }]}>Try asking:</Text>
-            <View style={styles.suggestionsGrid}>
+            <View style={styles.suggestGrid}>
               {SUGGESTED_QUESTIONS.map((q) => (
-                <TouchableOpacity key={q} onPress={() => sendMessage(q)} style={[styles.suggestChip, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <TouchableOpacity
+                  key={q}
+                  onPress={() => sendMessage(q)}
+                  style={[styles.suggestChip, { backgroundColor: colors.card, borderColor: colors.border }]}
+                >
                   <Text style={[styles.suggestText, { color: colors.foreground }]}>{q}</Text>
                 </TouchableOpacity>
               ))}
@@ -182,21 +346,30 @@ export default function ChatScreen() {
         )}
       </ScrollView>
 
+      {/* Input */}
       <View style={[styles.inputBar, { backgroundColor: colors.background, borderTopColor: colors.border, paddingBottom: Platform.OS === "web" ? 16 : insets.bottom + 100 }]}>
         <View style={[styles.inputWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <TextInput
             value={input}
             onChangeText={setInput}
-            placeholder="Ask about price, buy/sell, export, storage…"
+            placeholder={aiActive ? `Ask your ${config.provider} advisor…` : "Ask about market, prices, export, storage…"}
             placeholderTextColor={colors.mutedForeground}
-            style={[styles.input, { color: colors.foreground }]}
+            style={[styles.textInput, { color: colors.foreground }]}
             multiline
-            maxLength={300}
+            maxLength={500}
             onSubmitEditing={() => sendMessage(input)}
             returnKeyType="send"
+            blurOnSubmit={false}
           />
-          <TouchableOpacity onPress={() => sendMessage(input)} disabled={!input.trim() || isTyping} style={[styles.sendBtn, { backgroundColor: input.trim() && !isTyping ? colors.primary : colors.muted }]}>
-            <Feather name="send" size={16} color={input.trim() && !isTyping ? colors.primaryForeground : colors.mutedForeground} />
+          <TouchableOpacity
+            onPress={() => sendMessage(input)}
+            disabled={!input.trim() || isTyping}
+            style={[styles.sendBtn, { backgroundColor: input.trim() && !isTyping ? (aiActive ? providerColor : colors.primary) : colors.muted }]}
+          >
+            {isTyping
+              ? <ActivityIndicator size="small" color={colors.mutedForeground} />
+              : <Feather name="send" size={16} color={input.trim() ? colors.primaryForeground : colors.mutedForeground} />
+            }
           </TouchableOpacity>
         </View>
       </View>
@@ -206,31 +379,34 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  topBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
+  topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: StyleSheet.hairlineWidth },
   backBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
+  settingsBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
   topBarCenter: { flex: 1, flexDirection: "row", alignItems: "center", gap: 10 },
   aiAvatar: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   topBarTitle: { fontFamily: "Inter_700Bold", fontSize: 15 },
   onlineRow: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
   onlineDot: { width: 6, height: 6, borderRadius: 3 },
   onlineText: { fontFamily: "Inter_400Regular", fontSize: 11 },
+  configBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginHorizontal: 16, marginTop: 8, padding: 10, borderRadius: 8, borderWidth: 1 },
+  configBannerText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 },
   messageList: { flex: 1 },
   messageContent: { padding: 16, gap: 12 },
-  messageBubble: { maxWidth: "85%", borderRadius: 16, padding: 12, borderWidth: 1, gap: 6 },
+  bubble: { maxWidth: "86%", borderRadius: 16, padding: 12, borderWidth: 1, gap: 6 },
   userBubble: { alignSelf: "flex-end", borderBottomRightRadius: 4 },
-  assistantBubble: { alignSelf: "flex-start", borderBottomLeftRadius: 4 },
-  botAvatarSmall: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
-  messageText: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 20 },
-  msgTime: { fontFamily: "Inter_400Regular", fontSize: 10, textAlign: "right" },
-  typingDots: { flexDirection: "row", gap: 4, alignItems: "center", padding: 4 },
-  dot: { width: 7, height: 7, borderRadius: 3.5, opacity: 0.6 },
-  suggestionsWrap: { gap: 10, marginTop: 4 },
+  aiBubble: { alignSelf: "flex-start", borderBottomLeftRadius: 4 },
+  botIcon: { width: 22, height: 22, borderRadius: 11, alignItems: "center", justifyContent: "center" },
+  bubbleText: { fontFamily: "Inter_400Regular", fontSize: 13, lineHeight: 20 },
+  bubbleTime: { fontFamily: "Inter_400Regular", fontSize: 10, textAlign: "right" },
+  typingRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 2 },
+  typingText: { fontFamily: "Inter_400Regular", fontSize: 12 },
+  suggestions: { gap: 10, marginTop: 4 },
   suggestLabel: { fontFamily: "Inter_500Medium", fontSize: 12 },
-  suggestionsGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  suggestGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   suggestChip: { paddingHorizontal: 12, paddingVertical: 8, borderRadius: 20, borderWidth: 1 },
   suggestText: { fontFamily: "Inter_400Regular", fontSize: 12 },
   inputBar: { paddingHorizontal: 16, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth },
   inputWrap: { flexDirection: "row", alignItems: "flex-end", gap: 8, borderRadius: 24, borderWidth: 1, paddingHorizontal: 14, paddingVertical: 8 },
-  input: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 14, maxHeight: 80 },
+  textInput: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 14, maxHeight: 80, minHeight: 20 },
   sendBtn: { width: 36, height: 36, borderRadius: 18, alignItems: "center", justifyContent: "center" },
 });

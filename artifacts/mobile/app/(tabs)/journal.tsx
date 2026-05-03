@@ -10,7 +10,7 @@ import { useMarket } from "@/hooks/useMarket";
 import { computeTradeProfit, MANDIS, TradeGrade, JaggeryType, TradeEntry } from "@/constants/journalData";
 
 const GRADES: TradeGrade[] = ["A", "B", "C"];
-const TYPES: JaggeryType[] = ["Khandsari UP", "Kolhapuri", "TN Vellam", "Organic Certified", "Shakkar Gur", "Other"];
+const TYPES: JaggeryType[] = ["Khandsari UP", "Kolhapuri", "TN Vellam", "Organic", "Shakkar Gur", "Other"];
 
 type AddForm = { mandi: string; grade: TradeGrade; type: JaggeryType; quantity: string; buyPrice: string; storageMonths: string; storageCostPerMonth: string; transportCostPerQtl: string; date: string; notes: string };
 type SellForm = { sellPrice: string; soldQuantity: string; sellDate: string };

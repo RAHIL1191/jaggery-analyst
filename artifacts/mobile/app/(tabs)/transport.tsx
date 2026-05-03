@@ -51,7 +51,7 @@ export default function TransportScreen() {
     const qty = parseFloat(quantity) || 0;
     const qtyTons = qty / 10;
     const dest = DESTINATIONS.find((d) => d.label === destination);
-    const distKm = dest?.distanceFrom[source] ?? 500;
+    const distKm = dest?.distanceFrom[source as keyof typeof dest.distanceFrom] ?? 500;
 
     const freightPerTon = mode === "truck" ? TRUCK_RATE_PER_KM_PER_TON * distKm : RAIL_RATE_PER_KM_PER_TON * distKm;
     const freightTotal = freightPerTon * qtyTons;
