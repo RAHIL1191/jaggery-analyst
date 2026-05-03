@@ -44,5 +44,12 @@
 - Price history snapshots are stored locally for analysis
 - Alerts are stored locally
 
+## How to Run on Mobile
+- Install Expo Go on your phone
+- Open the app in Replit preview
+- Scan the QR code with Expo Go
+- Keep your phone and Replit session online
+- For local AI endpoints, use a phone-reachable IP address
+
 ## Purpose
 This app helps jaggery traders track prices, compare products, and get market advice using either live data or seasonal estimates.
