@@ -27,9 +27,9 @@ function NativeTabLayout() {
         <Icon sf={{ default: "building.2", selected: "building.2.fill" }} />
         <Label>Storage</Label>
       </NativeTabs.Trigger>
-      <NativeTabs.Trigger name="advisor">
-        <Icon sf={{ default: "brain.head.profile", selected: "brain.head.profile" }} />
-        <Label>Advisor</Label>
+      <NativeTabs.Trigger name="tools">
+        <Icon sf={{ default: "wrench.and.screwdriver", selected: "wrench.and.screwdriver.fill" }} />
+        <Label>Tools</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
   );
@@ -41,6 +41,8 @@ function ClassicTabLayout() {
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+
+  const HIDDEN = { href: null } as const;
 
   return (
     <Tabs
@@ -62,10 +64,7 @@ function ClassicTabLayout() {
           ) : isWeb ? (
             <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
           ) : null,
-        tabBarLabelStyle: {
-          fontFamily: "Inter_500Medium",
-          fontSize: 10,
-        },
+        tabBarLabelStyle: { fontFamily: "Inter_500Medium", fontSize: 10 },
       }}
     >
       <Tabs.Screen
@@ -101,14 +100,26 @@ function ClassicTabLayout() {
         }}
       />
       <Tabs.Screen
-        name="advisor"
+        name="tools"
         options={{
-          title: "Advisor",
+          title: "Tools",
           tabBarIcon: ({ color }) =>
-            isIOS ? <SymbolView name="brain.head.profile" tintColor={color} size={22} /> : <Feather name="cpu" size={21} color={color} />,
+            isIOS ? <SymbolView name="wrench.and.screwdriver" tintColor={color} size={22} /> : <Feather name="grid" size={21} color={color} />,
         }}
       />
-      <Tabs.Screen name="alerts" options={{ href: null }} />
+
+      {/* Hidden screens — accessible via router.push from Tools hub */}
+      <Tabs.Screen name="advisor" options={HIDDEN} />
+      <Tabs.Screen name="alerts" options={HIDDEN} />
+      <Tabs.Screen name="calculator" options={HIDDEN} />
+      <Tabs.Screen name="journal" options={HIDDEN} />
+      <Tabs.Screen name="seasonal" options={HIDDEN} />
+      <Tabs.Screen name="spread" options={HIDDEN} />
+      <Tabs.Screen name="quality" options={HIDDEN} />
+      <Tabs.Screen name="transport" options={HIDDEN} />
+      <Tabs.Screen name="export" options={HIDDEN} />
+      <Tabs.Screen name="policy" options={HIDDEN} />
+      <Tabs.Screen name="chat" options={HIDDEN} />
     </Tabs>
   );
 }
