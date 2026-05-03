@@ -64,6 +64,23 @@ export function getBaseUrlPlaceholder(provider: AIProvider): string {
   }
 }
 
+function normalizeConfig(next: Partial<AIConfig>): Partial<AIConfig> {
+  if (!next.provider) return next;
+  if (next.provider === "openai" || next.provider === "anthropic") {
+    return {
+      ...next,
+      baseUrl: "",
+    };
+  }
+  if (next.provider === "ollama") {
+    return {
+      ...next,
+      baseUrl: next.baseUrl ?? "http://localhost:11434",
+    };
+  }
+  return next;
+}
+
 export function useAIConfig() {
   const [config, setConfig] = useState<AIConfig>(DEFAULT_AI_CONFIG);
   const [loading, setLoading] = useState(true);
@@ -80,9 +97,15 @@ export function useAIConfig() {
   }, []);
 
   const updateConfig = useCallback(async (updates: Partial<AIConfig>) => {
-    const updated = { ...config, ...updates };
-    setConfig(updated);
-    await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(updated));
+    const merged = { ...config, ...normalizeConfig(updates) };
+    if (merged.provider === "openai" || merged.provider === "anthropic") {
+      merged.baseUrl = "";
+    }
+    if (merged.provider === "ollama" && !merged.baseUrl) {
+      merged.baseUrl = "http://localhost:11434";
+    }
+    setConfig(merged);
+    await AsyncStorage.setItem(CONFIG_KEY, JSON.stringify(merged));
   }, [config]);
 
   const resetConfig = useCallback(async () => {

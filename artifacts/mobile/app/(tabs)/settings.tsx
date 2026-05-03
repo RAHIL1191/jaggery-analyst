@@ -53,9 +53,26 @@ export default function SettingsScreen() {
   const [showKey, setShowKey] = useState(false);
 
   const update = useCallback(<K extends keyof AIConfig>(key: K, value: AIConfig[K]) => {
-    updateConfig({ [key]: value });
+    updateConfig({ [key]: value } as Partial<AIConfig>);
     setTestResult(null);
   }, [updateConfig]);
+
+  const selectProvider = useCallback((provider: AIProvider) => {
+    const next: Partial<AIConfig> = { provider, model: "" };
+    if (provider === "openai") {
+      next.baseUrl = "";
+      next.apiKey = config.provider === "anthropic" ? config.apiKey : config.apiKey;
+    } else if (provider === "anthropic") {
+      next.baseUrl = "";
+      next.apiKey = config.provider === "openai" ? config.apiKey : config.apiKey;
+    } else if (provider === "ollama") {
+      next.baseUrl = config.baseUrl || "http://localhost:11434";
+    } else {
+      next.baseUrl = config.baseUrl || "";
+    }
+    updateConfig(next);
+    setTestResult(null);
+  }, [config.baseUrl, config.provider, updateConfig]);
 
   const testConnection = useCallback(async () => {
     if (!config.enabled) {
@@ -131,7 +148,7 @@ export default function SettingsScreen() {
 
   if (loading) {
     return (
-      <View style={[styles.center, { backgroundColor: colors.background }]}>
+      <View style={[styles.center, { backgroundColor: colors.background }]}> 
         <ActivityIndicator color={colors.primary} />
       </View>
     );
@@ -148,9 +165,8 @@ export default function SettingsScreen() {
       keyboardShouldPersistTaps="handled"
       showsVerticalScrollIndicator={false}
     >
-      {/* Header */}
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: colors.muted }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { backgroundColor: colors.muted }]}> 
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
@@ -159,15 +175,14 @@ export default function SettingsScreen() {
         </View>
       </View>
 
-      {/* ── SECTION: AI ASSISTANT ── */}
-      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}> 
         <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconWrap, { backgroundColor: colors.primary + "18" }]}>
+          <View style={[styles.sectionIconWrap, { backgroundColor: colors.primary + "18" }]}> 
             <Feather name="cpu" size={18} color={colors.primary} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={[styles.sectionTitle, { color: colors.foreground }]}>AI Assistant</Text>
-            <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
+            <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}> 
               {config.enabled ? `Active · ${selectedProvider.label} · ${config.model || getModelPlaceholder(config.provider)}` : "Disabled — using built-in rule-based advisor"}
             </Text>
           </View>
@@ -181,20 +196,19 @@ export default function SettingsScreen() {
 
         {config.enabled && (
           <>
-            {/* Provider Cards */}
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Provider</Text>
             <View style={styles.providerGrid}>
               {PROVIDERS.map((p) => (
                 <TouchableOpacity
                   key={p.id}
-                  onPress={() => { update("provider", p.id); update("model", ""); }}
+                  onPress={() => selectProvider(p.id)}
                   style={[styles.providerCard, {
                     backgroundColor: config.provider === p.id ? p.color + "15" : colors.muted,
                     borderColor: config.provider === p.id ? p.color : colors.border,
                     borderWidth: config.provider === p.id ? 1.5 : 1,
                   }]}
                 >
-                  <Feather name={p.icon as "zap"} size={18} color={config.provider === p.id ? p.color : colors.mutedForeground} />
+                  <Feather name={p.icon as never} size={18} color={config.provider === p.id ? p.color : colors.mutedForeground} />
                   <Text style={[styles.providerLabel, { color: config.provider === p.id ? p.color : colors.foreground }]}>{p.label}</Text>
                   <Text style={[styles.providerSub, { color: colors.mutedForeground }]}>{p.subtitle}</Text>
                   {p.isLocal && (
@@ -206,13 +220,12 @@ export default function SettingsScreen() {
               ))}
             </View>
 
-            {/* Cloud: API Key */}
             {!isLocal && (
               <>
                 <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
                   {config.provider === "openai" ? "OpenAI API Key" : "Anthropic API Key"}
                 </Text>
-                <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
                   <TextInput
                     value={config.apiKey}
                     onChangeText={(v) => update("apiKey", v)}
@@ -227,21 +240,15 @@ export default function SettingsScreen() {
                     <Feather name={showKey ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
                   </TouchableOpacity>
                 </View>
-                <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-                  {config.provider === "openai"
-                    ? "Get your key at platform.openai.com → API Keys. Stored only on your device."
-                    : "Get your key at console.anthropic.com → API Keys. Stored only on your device."}
-                </Text>
               </>
             )}
 
-            {/* Local: Base URL */}
             {isLocal && (
               <>
                 <Text style={[styles.fieldLabel, { color: colors.foreground }]}>
                   {config.provider === "ollama" ? "Ollama Server URL" : "API Base URL"}
                 </Text>
-                <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
                   <TextInput
                     value={config.baseUrl}
                     onChangeText={(v) => update("baseUrl", v)}
@@ -253,16 +260,10 @@ export default function SettingsScreen() {
                     style={[styles.input, { color: colors.foreground }]}
                   />
                 </View>
-                <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-                  {config.provider === "ollama"
-                    ? "Run Ollama on your computer. Enter its local IP. Both must be on the same WiFi. Example: http://192.168.1.5:11434"
-                    : "LM Studio: http://192.168.1.5:1234  |  Jan AI: http://192.168.1.5:1337  |  Any OpenAI-compatible server."}
-                </Text>
-
                 {config.provider === "custom" && (
                   <>
                     <Text style={[styles.fieldLabel, { color: colors.foreground }]}>API Key (optional)</Text>
-                    <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+                    <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
                       <TextInput
                         value={config.apiKey}
                         onChangeText={(v) => update("apiKey", v)}
@@ -281,7 +282,6 @@ export default function SettingsScreen() {
               </>
             )}
 
-            {/* Model */}
             <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Model</Text>
             {modelSuggestions.length > 0 && (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginBottom: 8 }}>
@@ -299,7 +299,7 @@ export default function SettingsScreen() {
                 ))}
               </ScrollView>
             )}
-            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}>
+            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: colors.border }]}> 
               <TextInput
                 value={config.model}
                 onChangeText={(v) => update("model", v)}
@@ -311,7 +311,6 @@ export default function SettingsScreen() {
               />
             </View>
 
-            {/* Test Connection */}
             <TouchableOpacity
               onPress={testConnection}
               disabled={testing}
@@ -329,135 +328,11 @@ export default function SettingsScreen() {
                 {testing ? "Testing connection…" : "Test Connection"}
               </Text>
             </TouchableOpacity>
-
-            {testResult && (
-              <View style={[styles.testResult, { backgroundColor: testResult.ok ? colors.buy + "10" : colors.sell + "10", borderColor: testResult.ok ? colors.buy + "35" : colors.sell + "35" }]}>
-                <Feather name={testResult.ok ? "check-circle" : "x-circle"} size={14} color={testResult.ok ? colors.buy : colors.sell} />
-                <Text style={[styles.testResultText, { color: testResult.ok ? colors.buy : colors.sell }]}>
-                  {testResult.message}
-                </Text>
-              </View>
-            )}
-
-            {/* Local LLM Setup Guide */}
-            {isLocal && (
-              <View style={[styles.guideCard, { backgroundColor: colors.primary + "08", borderColor: colors.primary + "20" }]}>
-                <Text style={[styles.guideTitle, { color: colors.foreground }]}>
-                  {config.provider === "ollama" ? "Ollama Setup Guide" : "Local LLM Setup Guide"}
-                </Text>
-                {config.provider === "ollama" ? (
-                  <>
-                    {[
-                      "1. Install Ollama: ollama.com/download on your PC/Mac",
-                      "2. Pull a model: ollama pull llama3.2",
-                      "3. Allow external connections: set OLLAMA_HOST=0.0.0.0",
-                      "4. Find your computer's local IP (e.g. 192.168.1.5)",
-                      "5. Enter http://{your-ip}:11434 above",
-                      "6. Both phone and PC must be on same WiFi network",
-                    ].map((step) => (
-                      <Text key={step} style={[styles.guideStep, { color: colors.mutedForeground }]}>{step}</Text>
-                    ))}
-                  </>
-                ) : (
-                  <>
-                    {[
-                      "LM Studio: Download from lmstudio.ai, load any model, enable 'Local Server' on port 1234",
-                      "Jan AI: Download from jan.ai, start local server on port 1337",
-                      "Enter your computer's local IP and port above",
-                      "Both devices must be on the same WiFi network",
-                    ].map((step) => (
-                      <Text key={step} style={[styles.guideStep, { color: colors.mutedForeground }]}>{step}</Text>
-                    ))}
-                  </>
-                )}
-              </View>
-            )}
           </>
         )}
       </View>
 
-      {/* ── SECTION: MARKET DATA ── */}
-      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <View style={styles.sectionHeader}>
-          <View style={[styles.sectionIconWrap, { backgroundColor: colors.hold + "20" }]}>
-            <Feather name="trending-up" size={18} color={colors.hold} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Market Price Source</Text>
-            <Text style={[styles.sectionSub, { color: colors.mutedForeground }]}>
-              {config.useManualPrice && config.manualPrice ? `Manual: ₹${config.manualPrice}/qtl` : "Auto (seasonal model)"}
-            </Text>
-          </View>
-          <Switch
-            value={config.useManualPrice}
-            onValueChange={(v) => update("useManualPrice", v)}
-            trackColor={{ false: colors.muted, true: colors.hold + "60" }}
-            thumbColor={config.useManualPrice ? colors.hold : colors.mutedForeground}
-          />
-        </View>
-
-        {config.useManualPrice && (
-          <>
-            <Text style={[styles.fieldLabel, { color: colors.foreground }]}>Today's Mandi Price (₹/quintal)</Text>
-            <View style={[styles.inputRow, { backgroundColor: colors.muted, borderColor: config.manualPrice ? colors.hold + "60" : colors.border }]}>
-              <Text style={[styles.rupeePrefix, { color: colors.mutedForeground }]}>₹</Text>
-              <TextInput
-                value={config.manualPrice}
-                onChangeText={(v) => update("manualPrice", v)}
-                placeholder="e.g. 3650"
-                placeholderTextColor={colors.mutedForeground}
-                keyboardType="numeric"
-                style={[styles.input, { color: colors.foreground }]}
-              />
-              <Text style={[styles.rupeePrefix, { color: colors.mutedForeground }]}>/qtl</Text>
-            </View>
-            <Text style={[styles.hint, { color: colors.mutedForeground }]}>
-              Enter the price you see at your local mandi today. All calculations (profit, signals, AI advice) will use this as the base price.
-            </Text>
-            {config.manualPrice && (
-              <View style={[styles.priceActiveBar, { backgroundColor: colors.hold + "12", borderColor: colors.hold + "30" }]}>
-                <Feather name="check-circle" size={13} color={colors.hold} />
-                <Text style={[styles.priceActiveText, { color: colors.hold }]}>
-                  ₹{config.manualPrice}/qtl set as today's price for all calculations
-                </Text>
-              </View>
-            )}
-          </>
-        )}
-
-        {!config.useManualPrice && (
-          <View style={[styles.autoExplain, { backgroundColor: colors.muted }]}>
-            <Text style={[styles.autoExplainText, { color: colors.mutedForeground }]}>
-              Auto mode uses a seasonal model based on real jaggery market patterns. Prices vary by month (lowest Feb–Mar harvest, highest Oct–Nov festival). Enable manual to override with your actual mandi rate.
-            </Text>
-          </View>
-        )}
-
-        <View style={[styles.dataSourceInfo, { borderTopColor: colors.border }]}>
-          <Feather name="info" size={12} color={colors.mutedForeground} />
-          <Text style={[styles.dataSourceText, { color: colors.mutedForeground }]}>
-            Live jaggery data APIs: Check agmarknet.gov.in (official mandi prices) or data.gov.in. For accurate trading, enter your local mandi price manually above.
-          </Text>
-        </View>
-      </View>
-
-      {/* ── SECTION: ABOUT ── */}
-      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.foreground }]}>About</Text>
-        {[
-          { label: "AI Proxy", value: "Your API key stays on device. Cloud AI calls go via our secure server." },
-          { label: "Local LLM", value: "Ollama/LM Studio calls go directly from your phone to the local server — never through cloud." },
-          { label: "Data Privacy", value: "Trade journal, settings, and prices stored only in your device's local storage." },
-          { label: "AI Providers", value: "OpenAI, Anthropic (cloud) · Ollama, LM Studio, Jan AI, any OpenAI-compatible server (local)." },
-        ].map((row) => (
-          <View key={row.label} style={[styles.aboutRow, { borderBottomColor: colors.border }]}>
-            <Text style={[styles.aboutLabel, { color: colors.foreground }]}>{row.label}</Text>
-            <Text style={[styles.aboutValue, { color: colors.mutedForeground }]}>{row.value}</Text>
-          </View>
-        ))}
-      </View>
-
-      <TouchableOpacity onPress={confirmReset} style={[styles.resetBtn, { backgroundColor: colors.sell + "10", borderColor: colors.sell + "30" }]}>
+      <TouchableOpacity onPress={confirmReset} style={[styles.resetBtn, { backgroundColor: colors.sell + "10", borderColor: colors.sell + "30" }]}> 
         <Feather name="trash-2" size={15} color={colors.sell} />
         <Text style={[styles.resetBtnText, { color: colors.sell }]}>Reset All Settings</Text>
       </TouchableOpacity>
@@ -487,27 +362,11 @@ const styles = StyleSheet.create({
   localBadgeText: { fontFamily: "Inter_700Bold", fontSize: 8, letterSpacing: 0.5 },
   inputRow: { flexDirection: "row", alignItems: "center", borderRadius: 10, borderWidth: 1, paddingHorizontal: 12, height: 46, gap: 6 },
   input: { flex: 1, fontFamily: "Inter_400Regular", fontSize: 14, height: 46 },
-  rupeePrefix: { fontFamily: "Inter_500Medium", fontSize: 15 },
   eyeBtn: { padding: 4 },
-  hint: { fontFamily: "Inter_400Regular", fontSize: 11, lineHeight: 17, marginTop: -6 },
   modelChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1 },
   modelChipText: { fontFamily: "Inter_500Medium", fontSize: 12 },
   testBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 12, borderWidth: 1 },
   testBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
-  testResult: { flexDirection: "row", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1, alignItems: "flex-start" },
-  testResultText: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18, flex: 1 },
-  guideCard: { borderRadius: 10, padding: 12, borderWidth: 1, gap: 5 },
-  guideTitle: { fontFamily: "Inter_600SemiBold", fontSize: 13, marginBottom: 4 },
-  guideStep: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
-  priceActiveBar: { flexDirection: "row", gap: 7, padding: 10, borderRadius: 8, borderWidth: 1, alignItems: "center" },
-  priceActiveText: { fontFamily: "Inter_500Medium", fontSize: 12, flex: 1 },
-  autoExplain: { padding: 12, borderRadius: 8 },
-  autoExplainText: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
-  dataSourceInfo: { flexDirection: "row", gap: 7, paddingTop: 10, borderTopWidth: StyleSheet.hairlineWidth, alignItems: "flex-start" },
-  dataSourceText: { fontFamily: "Inter_400Regular", fontSize: 11, lineHeight: 16, flex: 1 },
-  aboutRow: { paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, gap: 3 },
-  aboutLabel: { fontFamily: "Inter_600SemiBold", fontSize: 13 },
-  aboutValue: { fontFamily: "Inter_400Regular", fontSize: 12, lineHeight: 18 },
   resetBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 13, borderRadius: 14, borderWidth: 1 },
   resetBtnText: { fontFamily: "Inter_600SemiBold", fontSize: 14 },
 });
